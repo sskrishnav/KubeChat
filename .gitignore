@@ -29,5 +29,11 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# KubeChat
+/bin/
+/dev/kubeconfig
+*.db
+
