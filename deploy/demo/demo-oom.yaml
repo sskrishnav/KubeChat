@@ -1,0 +1,29 @@
+# Fault 2: allocates ~200 MiB under a 64Mi limit -> OOMKilled, then CrashLoopBackOff.
+# Evidence: pod status (lastState.terminated.reason: OOMKilled), not the logs.
+# Not polinux/stress: that image is amd64-only and fails to pull on arm64 kind.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-oom
+  labels: { app: demo-oom }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-oom }
+  template:
+    metadata:
+      labels: { app: demo-oom }
+    spec:
+      containers:
+        - name: worker
+          image: python:3.13-alpine
+          command: ["python3", "-c"]
+          args:
+            - |
+              import time
+              print("loading cache...", flush=True)
+              cache = b"x" * (200 * 1024 * 1024)  # writes every page, so memory use really grows
+              time.sleep(3600)
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }

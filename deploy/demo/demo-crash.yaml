@@ -1,0 +1,22 @@
+# Fault 3: exits 1 on startup -> CrashLoopBackOff.
+# Evidence: logs of the previous container ("missing DB_URL").
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-crash
+  labels: { app: demo-crash }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-crash }
+  template:
+    metadata:
+      labels: { app: demo-crash }
+    spec:
+      containers:
+        - name: api
+          image: busybox:1.37
+          command: ["sh", "-c", "echo 'fatal: missing DB_URL'; exit 1"]
+          resources:
+            requests: { cpu: 10m, memory: 8Mi }
+            limits: { cpu: 100m, memory: 32Mi }

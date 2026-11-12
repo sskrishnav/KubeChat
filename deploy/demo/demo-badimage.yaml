@@ -1,0 +1,21 @@
+# Fault 1: an image tag that doesn't exist -> ErrImagePull / ImagePullBackOff.
+# Evidence: events only (the container never starts, so there are no logs).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-badimage
+  labels: { app: demo-badimage }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-badimage }
+  template:
+    metadata:
+      labels: { app: demo-badimage }
+    spec:
+      containers:
+        - name: web
+          image: nginx:does-not-exist
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }

@@ -1,0 +1,23 @@
+# Healthy app, 2 replicas: the target for scaling with approval in step 12.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-web
+  labels: { app: demo-web }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: demo-web }
+  template:
+    metadata:
+      labels: { app: demo-web }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 128Mi }  # nginx starts one worker per CPU; 64Mi is tight on 16 cores
