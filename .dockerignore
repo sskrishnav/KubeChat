@@ -1,0 +1,6 @@
+# Send only the Go sources to `docker build` (never .env or dev/kubeconfig).
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/

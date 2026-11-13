@@ -26,23 +26,41 @@ mcp:
     denied_resources:
       - { group: "", version: "v1", kind: "Secret" }
 
-  # What the server's ServiceAccount may do. Kubernetes enforces this even if
-  # the LLM and the consent gate were both fooled.
+  # What the server's ServiceAccount may do, enforced by Kubernetes.
+  # Reads: almost everything ("view" excludes Secrets). Writes: scale deployments
+  # in any namespace. The bot refuses protected namespaces (bot.env
+  # KUBECHAT_PROTECTED_NAMESPACES) and asks a human before every other change.
   rbac:
-    extraClusterRoleBindings:
-      - name: view                 # read almost everything; "view" excludes Secrets
-        roleRef: { name: view, external: true }
-    extraRoles:
-      - name: scale                # the only write: scale deployments in "apps"
-        namespace: apps
+    extraClusterRoles:
+      - name: scale
         rules:
           - apiGroups: ["apps"]
             resources: ["deployments", "deployments/scale"]
             verbs: ["get", "patch", "update"]
-    extraRoleBindings:
+    extraClusterRoleBindings:
+      - name: view
+        roleRef: { name: view, external: true }
       - name: scale
-        namespace: apps
         roleRef: { name: scale }
+
+# -- The KubeChat bot.
+bot:
+  enabled: true
+  image:
+    repository: ghcr.io/sskrishnav/kubechat # not published yet; kind uses a local build (values-kind.yaml)
+    tag: ""                                 # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+  # Settings, passed as environment variables (read by internal/config).
+  env:
+    KUBECHAT_LLM_BASE_URL: http://host.docker.internal:11434/v1 # Ollama on the host (Docker Desktop)
+    KUBECHAT_LLM_MODEL: qwen3:8b
+    KUBECHAT_MAX_TOOL_ROUNDS: "8"
+    KUBECHAT_MCP_URL: http://kubechat-mcp:8080/mcp
+    KUBECHAT_PROTECTED_NAMESPACES: "kube-*,kubechat" # never changed; kubechat = the bot's own namespace
+    KUBECHAT_TOOL_TIERS: resources_scale=write # the server marks it destructive; the MVP treats it as a write
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
 
 # -- Dev only: expose the MCP server on a fixed NodePort so KubeChat running on
 # the laptop (go run) can reach it. kind maps this port to localhost; see

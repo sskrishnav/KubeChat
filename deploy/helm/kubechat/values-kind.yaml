@@ -1,4 +1,12 @@
 # Overrides for the local kind playground (used by deploy/kind/launch.sh).
+
 # localhost:8080 -> kind node port 30080 -> MCP server Service.
 mcpNodePort:
   enabled: true
+
+# The bot image is built locally and loaded into kind (`make dev`), never pulled.
+bot:
+  image:
+    repository: kubechat
+    tag: dev
+    pullPolicy: Never

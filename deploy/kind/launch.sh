@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Local KubeChat playground on kind. Everything goes into one kind cluster:
 #   kind cluster -> dev/kubeconfig -> namespaces -> metrics-server
-#   -> demo apps (namespace apps) -> kubechat chart with the MCP server (namespace kubechat)
+#   -> demo apps (namespace apps) -> bot image -> kubechat chart (namespace kubechat:
+#      MCP server + bot)
+#
+# Usage:
+#   launch.sh        set up everything (make up)
+#   launch.sh bot    rebuild the bot image and redeploy it (make dev)
 #
 # Credentials go only to dev/kubeconfig (git-ignored):
 #   - kind gets --kubeconfig, so it never writes to ~/.kube/config or changes
@@ -26,6 +31,8 @@ KUBECHAT_NAMESPACE="kubechat"
 MCP_DEPLOYMENT="kubechat-mcp"             # mcp.fullnameOverride in the chart's values.yaml
 MCP_NODE_PORT=30080                       # mcpNodePort.nodePort in the chart's values.yaml
 MCP_HOST_PORT=8080                        # MCP server reachable at http://localhost:8080/mcp
+BOT_IMAGE="kubechat:dev"                  # bot.image in the chart's values-kind.yaml
+BOT_DEPLOYMENT="kubechat-bot"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KUBECONFIG_FILE="$ROOT/dev/kubeconfig"
@@ -200,6 +207,26 @@ install_kubechat() {
   wait_for_rollout "$KUBECHAT_NAMESPACE" "$MCP_DEPLOYMENT" 300s
 }
 
+# Build the bot image from the repo's Dockerfile. --provenance=false keeps it a
+# plain single-platform image, which `kind load` handles reliably.
+build_bot_image() {
+  log "building the bot image $BOT_IMAGE"
+  run docker build --provenance=false -t "$BOT_IMAGE" "$ROOT"
+}
+
+# Copy the image into the kind nodes, so no registry is needed.
+load_bot_image() {
+  log "loading $BOT_IMAGE into kind"
+  run kind load docker-image "$BOT_IMAGE" --name "$CLUSTER_NAME"
+}
+
+# The tag stays "dev", so restart the pod to pick up the newly loaded image.
+restart_bot() {
+  log "restarting the bot"
+  run kubectl --kubeconfig "$KUBECONFIG_FILE" -n "$KUBECHAT_NAMESPACE" rollout restart "deployment/$BOT_DEPLOYMENT"
+  wait_for_rollout "$KUBECHAT_NAMESPACE" "$BOT_DEPLOYMENT" 120s
+}
+
 # Smoke test: an MCP initialize request must return a session id.
 # The NodePort route can lag the rollout by a few seconds (kube-proxy has to
 # program it; until then Docker's port forward answers with an empty reply),
@@ -232,19 +259,37 @@ show_status() {
 
 main() {
   check_tools
-  create_cluster
-  write_kubeconfig
-  wait_for_nodes
-  create_namespaces
-  install_metrics_server
-  deploy_demo
-  install_kubechat
-  check_mcp
-  show_status
-
-  log "done."
-  echo "kubectl:    kubectl --kubeconfig dev/kubeconfig ..."
-  echo "MCP server: http://localhost:${MCP_HOST_PORT}/mcp"
+  case "${1:-all}" in
+    all)
+      create_cluster
+      write_kubeconfig
+      wait_for_nodes
+      create_namespaces
+      install_metrics_server
+      deploy_demo
+      build_bot_image
+      load_bot_image
+      install_kubechat
+      restart_bot
+      check_mcp
+      show_status
+      log "done."
+      echo "kubectl:    kubectl --kubeconfig dev/kubeconfig ..."
+      echo "MCP server: http://localhost:${MCP_HOST_PORT}/mcp"
+      echo "bot logs:   make logs"
+      ;;
+    bot)
+      cluster_exists || die "no '$CLUSTER_NAME' cluster yet; run $0 (make up) first"
+      write_kubeconfig
+      build_bot_image
+      load_bot_image
+      install_kubechat
+      restart_bot
+      ;;
+    *)
+      die "usage: $0 [bot]"
+      ;;
+  esac
 }
 
 main "$@"
