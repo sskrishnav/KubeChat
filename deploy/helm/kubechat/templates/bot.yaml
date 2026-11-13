@@ -43,7 +43,7 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ .Release.Name }}-bot
-            - secretRef: # Slack tokens, added in step 7
+            - secretRef: # Slack tokens; optional until Slack is set up
                 name: {{ .Release.Name }}-slack
                 optional: true
           securityContext:

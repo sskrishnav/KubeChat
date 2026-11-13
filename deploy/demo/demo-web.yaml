@@ -1,4 +1,4 @@
-# Healthy app, 2 replicas: the target for scaling with approval in step 12.
+# Healthy app, 2 replicas: the target for scaling with approval.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
