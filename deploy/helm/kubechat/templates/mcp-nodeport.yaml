@@ -1,0 +1,22 @@
+{{- if .Values.mcpNodePort.enabled }}
+# Dev only: a fixed NodePort for the MCP server. The upstream chart's Service
+# can't pin a nodePort, so this second Service selects the same pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.mcp.fullnameOverride }}-nodeport
+  labels:
+    app.kubernetes.io/part-of: kubechat
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: NodePort
+  selector:
+    # The upstream chart's pod selector labels (name comes from mcp.nameOverride).
+    app.kubernetes.io/name: {{ .Values.mcp.nameOverride }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: {{ .Values.mcpNodePort.nodePort }}
+{{- end }}

@@ -1,0 +1,6 @@
+dependencies:
+- name: kubernetes-mcp-server
+  repository: oci://ghcr.io/containers/charts
+  version: 0.1.2
+digest: sha256:c50c00bc669d776defc558abd28ff4564ed2c7c547d23131a8df9fd5f29d19ea
+generated: "2026-11-13T13:24:26.249533+01:00"

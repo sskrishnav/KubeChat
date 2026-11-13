@@ -1,0 +1,15 @@
+apiVersion: v2
+name: kubechat
+description: Slack-driven Kubernetes debugging via MCP, with human approval for every change.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  # The Kubernetes MCP server: the only component that talks to the Kubernetes API.
+  # Pinned because KubeChat's policy depends on its exact tool names (docs/tools.md).
+  # Later releases add a second copy (reader/writer split) and the KubeChat gateway.
+  - name: kubernetes-mcp-server
+    alias: mcp
+    version: 0.1.2
+    repository: oci://ghcr.io/containers/charts

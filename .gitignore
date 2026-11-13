@@ -36,4 +36,6 @@ go.work.sum
 /bin/
 /dev/kubeconfig
 *.db
+# Helm chart dependencies, downloaded by `helm dependency build` (Chart.lock is committed)
+/deploy/helm/kubechat/charts/
 

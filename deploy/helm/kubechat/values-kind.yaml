@@ -1,0 +1,4 @@
+# Overrides for the local kind playground (used by deploy/kind/launch.sh).
+# localhost:8080 -> kind node port 30080 -> MCP server Service.
+mcpNodePort:
+  enabled: true

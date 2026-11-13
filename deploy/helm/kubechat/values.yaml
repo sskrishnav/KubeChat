@@ -1,0 +1,52 @@
+# Default values for the kubechat chart. Install it into its own namespace:
+#   helm upgrade --install kubechat deploy/helm/kubechat -n kubechat --create-namespace
+
+# -- Kubernetes MCP server (official chart, aliased "mcp").
+# Everything under mcp: is passed to that chart; see its values.yaml for all options.
+mcp:
+  nameOverride: kubechat-mcp       # stable pod labels (used by templates/mcp-nodeport.yaml)
+  fullnameOverride: kubechat-mcp   # stable names: Deployment, Service, ServiceAccount
+  ingress:
+    enabled: false                 # the upstream default is on; KubeChat needs no ingress
+
+  # Rendered into the server's config.toml. Tool names and hints: docs/tools.md.
+  config:
+    port: "{{ .Values.service.port }}"
+    toolsets: ["core"]
+    enabled_tools:
+      # read: run at once
+      - pods_list_in_namespace
+      - pods_get
+      - pods_log
+      - events_list
+      - resources_list
+      - resources_get
+      # write: KubeChat runs it only after a human clicks Approve
+      - resources_scale
+    denied_resources:
+      - { group: "", version: "v1", kind: "Secret" }
+
+  # What the server's ServiceAccount may do. Kubernetes enforces this even if
+  # the LLM and the consent gate were both fooled.
+  rbac:
+    extraClusterRoleBindings:
+      - name: view                 # read almost everything; "view" excludes Secrets
+        roleRef: { name: view, external: true }
+    extraRoles:
+      - name: scale                # the only write: scale deployments in "apps"
+        namespace: apps
+        rules:
+          - apiGroups: ["apps"]
+            resources: ["deployments", "deployments/scale"]
+            verbs: ["get", "patch", "update"]
+    extraRoleBindings:
+      - name: scale
+        namespace: apps
+        roleRef: { name: scale }
+
+# -- Dev only: expose the MCP server on a fixed NodePort so KubeChat running on
+# the laptop (go run) can reach it. kind maps this port to localhost; see
+# values-kind.yaml and deploy/kind/launch.sh. Keep it off on real clusters.
+mcpNodePort:
+  enabled: false
+  nodePort: 30080
