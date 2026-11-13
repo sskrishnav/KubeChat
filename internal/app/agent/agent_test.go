@@ -25,12 +25,12 @@ func (s *scriptedLLM) Complete(_ context.Context, history []core.Message, _ []co
 	return r, nil
 }
 
-// fakeTools returns a fixed output, or an error for the tool named "broken".
-type fakeTools struct{ output string }
+// fakeGate returns a fixed output, or an error for the tool named "broken".
+type fakeGate struct{ output string }
 
-func (f *fakeTools) List(context.Context) ([]core.ToolSpec, error) { return nil, nil }
+func (f *fakeGate) List(context.Context) ([]core.ToolSpec, error) { return nil, nil }
 
-func (f *fakeTools) Call(_ context.Context, c core.ToolCall) (core.ToolResult, error) {
+func (f *fakeGate) Call(_ context.Context, c core.ToolCall) (core.ToolResult, error) {
 	if c.Name == "broken" {
 		return core.ToolResult{}, errors.New("refused: nope")
 	}
@@ -47,7 +47,7 @@ func TestAskRunsToolsThenAnswers(t *testing.T) {
 		toolCall("c2", "broken"),
 		{Role: "assistant", Text: "demo-crash: missing DB_URL"},
 	}}
-	a := &Agent{LLM: llm, Tools: &fakeTools{output: "fatal: missing DB_URL password=hunter2"}, MaxRounds: 5, MaxOutput: 1000}
+	a := &Agent{LLM: llm, Gate: &fakeGate{output: "fatal: missing DB_URL password=hunter2"}, MaxRounds: 5, MaxOutput: 1000}
 
 	answer, err := a.Ask(context.Background(), "why is demo-crash failing?")
 	if err != nil {
@@ -72,7 +72,7 @@ func TestAskRunsToolsThenAnswers(t *testing.T) {
 
 func TestAskStopsAfterMaxRounds(t *testing.T) {
 	llm := &scriptedLLM{replies: []core.Message{toolCall("c1", "pods_log"), toolCall("c2", "pods_log")}}
-	a := &Agent{LLM: llm, Tools: &fakeTools{}, MaxRounds: 2}
+	a := &Agent{LLM: llm, Gate: &fakeGate{}, MaxRounds: 2}
 	if _, err := a.Ask(context.Background(), "loop forever"); err == nil {
 		t.Error("want an error after MaxRounds")
 	}

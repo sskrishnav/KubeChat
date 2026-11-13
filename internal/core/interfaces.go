@@ -11,9 +11,10 @@ type LLM interface {
 	Complete(ctx context.Context, history []Message, tools []ToolSpec) (Message, error)
 }
 
-// Tools lists and runs tools. The agent always gets the consent-gated
-// version, never the MCP adapter directly.
-type Tools interface {
+// ToolRunner lists the MCP tools and runs one. Two types implement it: the
+// MCP client (runs the tool) and the gate (checks the call, then hands it to
+// the MCP client). The agent only ever gets the gate.
+type ToolRunner interface {
 	List(ctx context.Context) ([]ToolSpec, error)
 	Call(ctx context.Context, c ToolCall) (ToolResult, error)
 }

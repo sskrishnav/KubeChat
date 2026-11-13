@@ -1,4 +1,4 @@
-// Package mcp talks to the Kubernetes MCP server and implements core.Tools.
+// Package mcp talks to the Kubernetes MCP server and implements core.ToolRunner.
 package mcp
 
 import (

@@ -28,14 +28,14 @@ Rules:
 
 type Agent struct {
 	LLM       core.LLM
-	Tools     core.Tools // the consent gate, never the MCP server directly
-	MaxRounds int        // most LLM <-> tool round trips per question
-	MaxOutput int        // bytes of tool output kept per call
+	Gate      core.ToolRunner // the consent gate, never the MCP server directly
+	MaxRounds int             // most LLM <-> tool round trips per question
+	MaxOutput int             // bytes of tool output kept per call
 }
 
 // Ask answers one question.
 func (a *Agent) Ask(ctx context.Context, question string) (string, error) {
-	tools, err := a.Tools.List(ctx)
+	tools, err := a.Gate.List(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +62,7 @@ func (a *Agent) Ask(ctx context.Context, question string) (string, error) {
 // run calls one tool and returns its output, cleaned for the LLM. Errors go
 // back to the model as text, so it can try something else.
 func (a *Agent) run(ctx context.Context, call core.ToolCall) string {
-	res, err := a.Tools.Call(ctx, call)
+	res, err := a.Gate.Call(ctx, call)
 	if err != nil {
 		return "error: " + err.Error()
 	}

@@ -39,8 +39,8 @@ func main() {
 	// Wiring: the agent only ever sees the gate; only the gate sees the MCP server.
 	bot := &agent.Agent{
 		LLM: llm.New(cfg.LLMBaseURL, cfg.LLMModel),
-		Tools: &gate.Gate{
-			Tools:  &mcp.Client{URL: cfg.MCPURL},
+		Gate: &gate.Gate{
+			Server: &mcp.Client{URL: cfg.MCPURL},
 			Policy: policy.Policy{Overrides: cfg.ToolTiers, ProtectedNamespaces: cfg.ProtectedNamespaces},
 		},
 		MaxRounds: cfg.MaxToolRounds,

@@ -8,26 +8,26 @@ import (
 	"github.com/sskrishnav/kubechat/internal/core"
 )
 
-// fakeTools stands in for the MCP server and records what actually ran.
-type fakeTools struct {
+// fakeServer stands in for the MCP client and records what actually ran.
+type fakeServer struct {
 	specs []core.ToolSpec
 	ran   []string
 }
 
-func (f *fakeTools) List(context.Context) ([]core.ToolSpec, error) { return f.specs, nil }
+func (f *fakeServer) List(context.Context) ([]core.ToolSpec, error) { return f.specs, nil }
 
-func (f *fakeTools) Call(_ context.Context, c core.ToolCall) (core.ToolResult, error) {
+func (f *fakeServer) Call(_ context.Context, c core.ToolCall) (core.ToolResult, error) {
 	f.ran = append(f.ran, c.Name)
 	return core.ToolResult{Text: "ok"}, nil
 }
 
 func TestGate(t *testing.T) {
 	yes := true
-	server := &fakeTools{specs: []core.ToolSpec{
+	server := &fakeServer{specs: []core.ToolSpec{
 		{Name: "pods_log", Hints: &core.ToolHints{ReadOnly: true}},
 		{Name: "resources_scale", Hints: &core.ToolHints{Destructive: &yes}},
 	}}
-	g := &Gate{Tools: server, Policy: policy.Policy{
+	g := &Gate{Server: server, Policy: policy.Policy{
 		Overrides:           map[string]core.Tier{"resources_scale": core.TierWrite},
 		ProtectedNamespaces: []string{"kube-*"},
 	}}

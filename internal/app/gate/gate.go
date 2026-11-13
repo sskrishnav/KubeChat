@@ -16,7 +16,7 @@ import (
 )
 
 type Gate struct {
-	Tools  core.Tools // the MCP server
+	Server core.ToolRunner // the MCP client
 	Policy policy.Policy
 
 	mu    sync.RWMutex
@@ -26,7 +26,7 @@ type Gate struct {
 // List returns the MCP server's tools and remembers them, so Call can check
 // each call against the tool's hints.
 func (g *Gate) List(ctx context.Context) ([]core.ToolSpec, error) {
-	specs, err := g.Tools.List(ctx)
+	specs, err := g.Server.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (g *Gate) Call(ctx context.Context, call core.ToolCall) (core.ToolResult, e
 	}
 
 	slog.Info("tool call", "tool", call.Name, "tier", d.Tier, "args", string(call.Args))
-	return g.Tools.Call(ctx, call)
+	return g.Server.Call(ctx, call)
 }
 
 func refuse(call core.ToolCall, reason string) (core.ToolResult, error) {
