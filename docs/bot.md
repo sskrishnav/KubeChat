@@ -242,6 +242,81 @@ The same as steps (`agent.Ask`):
       - add it to the history as a `tool` message, with the call's ID.
 4. Still no answer after `MaxRounds` rounds: return an error.
 
+### Every call, in code
+
+The same flow, with the real calls and structs. The file for each call is on the right
+(paths are under `internal/`). `══►` marks a network call.
+
+```
+bot.Ask(ctx, question)                                          cmd/kubechat/main.go
+│                                                             → app/agent/agent.go
+│
+├─ tools, err := a.Gate.List(ctx)                             → app/gate/gate.go
+│   ├─ specs, err := g.Server.List(ctx)                       → adapters/mcp/mcp.go
+│   │   ├─ session, err := c.connect(ctx)
+│   │   │   └─ client.Connect(ctx, &sdk.StreamableClientTransport{Endpoint: c.URL}, nil)
+│   │   │        ══ POST /mcp  initialize ════════════════════════► MCP server
+│   │   ├─ res, err := session.ListTools(ctx, &sdk.ListToolsParams{})
+│   │   │        ══ POST /mcp  tools/list ════════════════════════► MCP server
+│   │   ├─ each res.Tools[i] → core.ToolSpec{Name, Description, InputSchema, Hints}
+│   │   └─ session.Close()
+│   ├─ g.specs = map[string]core.ToolSpec        (by name; Call checks against it)
+│   └─ return specs                              ([]core.ToolSpec)
+│
+├─ history := []core.Message{
+│      {Role: "system", Text: systemPrompt},
+│      {Role: "user",   Text: question},
+│  }
+│
+├─ for round := 0; round < a.MaxRounds; round++ {
+│   │
+│   ├─ reply, err := a.LLM.Complete(ctx, history, tools)      → adapters/llm/llm.go
+│   │   ├─ req := request{Model, Messages: <history>, Tools: <tools>, Temperature: 0}
+│   │   ├─ httpResp, err := c.HTTP.Do(httpReq)
+│   │   │        ══ POST {BaseURL}/chat/completions ══════════════► Ollama
+│   │   └─ return core.Message{Role: "assistant", Text,
+│   │                          ToolCalls: []core.ToolCall{{ID, Name, Args}}}
+│   │
+│   ├─ history = append(history, reply)
+│   │
+│   ├─ if len(reply.ToolCalls) == 0 { return reply.Text, nil }        ✔ the answer
+│   │
+│   └─ for _, call := range reply.ToolCalls {
+│       │
+│       ├─ a.run(ctx, call)                                   → app/agent/agent.go
+│       │   ├─ res, err := a.Gate.Call(ctx, call)             → app/gate/gate.go
+│       │   │   ├─ spec, known := g.specs[call.Name]
+│       │   │   │   └─ !known → return refuse(call, "unknown tool")
+│       │   │   ├─ d := g.Policy.Decide(spec, call.Args)      → app/policy/policy.go
+│       │   │   │   ├─ tier := p.Tier(spec)                   (core.Tier)
+│       │   │   │   └─ return policy.Decision{Tier, NeedsApproval, Refused}
+│       │   │   ├─ d.Refused != "" → return refuse(call, d.Refused)
+│       │   │   ├─ d.NeedsApproval → return refuse(call, "this change needs human approval…")
+│       │   │   │     refuse(): slog.Info("tool refused", …)
+│       │   │   │               return core.ToolResult{}, fmt.Errorf("refused: %s", reason)
+│       │   │   ├─ slog.Info("tool call", "tool", call.Name, "tier", d.Tier, "args", …)
+│       │   │   └─ return g.Server.Call(ctx, call)            → adapters/mcp/mcp.go
+│       │   │       ├─ session, err := c.connect(ctx)
+│       │   │       │        ══ POST /mcp  initialize ════════════════► MCP server
+│       │   │       ├─ res, err := session.CallTool(ctx,
+│       │   │       │      &sdk.CallToolParams{Name: call.Name, Arguments: call.Args})
+│       │   │       │        ══ POST /mcp  tools/call ════════════════► MCP server ══► K8s API
+│       │   │       ├─ join the text parts of res.Content
+│       │   │       ├─ session.Close()
+│       │   │       └─ return core.ToolResult{Text, IsError: res.IsError}
+│       │   │
+│       │   ├─ err != nil → return "error: " + err.Error()
+│       │   ├─ text := redact.Clean(res.Text, a.MaxOutput)    → redact/redact.go
+│       │   └─ res.IsError → return "error: " + text,  else return text
+│       │
+│       └─ history = append(history, core.Message{
+│              Role: "tool", ToolCallID: call.ID, Text: <what a.run returned>})
+│      }
+│   }
+│
+└─ return "", fmt.Errorf("no answer after %d tool rounds", a.MaxRounds)
+```
+
 ### What the history looks like
 
 From a real run of *"why are pods failing in apps?"*:
