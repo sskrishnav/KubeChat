@@ -58,6 +58,11 @@ bot:
     KUBECHAT_MCP_URL: http://kubechat-mcp:8080/mcp
     KUBECHAT_PROTECTED_NAMESPACES: "kube-*,kubechat" # never changed; kubechat = the bot's own namespace
     KUBECHAT_TOOL_TIERS: resources_scale=write # the server marks it destructive; the MVP treats it as a write
+    KUBECHAT_SLACK_ENABLED: "false" # "true" needs the Slack tokens in secretEnv
+  # Secrets, passed as environment variables from a Secret. Set at install time, never here.
+  secretEnv:
+    KUBECHAT_SLACK_APP_TOKEN: "xapp-***" # placeholder
+    KUBECHAT_SLACK_BOT_TOKEN: "xoxb-***" # placeholder
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 256Mi }

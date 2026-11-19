@@ -39,7 +39,7 @@ flowchart LR
 
 | # | From → To | Protocol | Address | Auth | Set in |
 |---|---|---|---|---|---|
-| 1 | Bot ⇄ Slack | WebSocket (Socket Mode) for events and clicks; HTTPS Web API for posting | Slack's servers, outbound only | app token `xapp-…` (socket), bot token `xoxb-…` (posting) | `.env` → Secret `kubechat-slack` |
+| 1 | Bot ⇄ Slack | WebSocket (Socket Mode) for events and clicks; HTTPS Web API for posting | Slack's servers, outbound only | app token `xapp-…` (socket), bot token `xoxb-…` (posting) | `.env` → chart `bot.secretEnv` → Secret `kubechat-bot` |
 | 2 | Bot → Ollama | HTTP, OpenAI-compatible `/v1/chat/completions` | pod: `http://host.docker.internal:11434/v1`<br/>`go run`: `http://localhost:11434/v1` | none | `KUBECHAT_LLM_BASE_URL`, `KUBECHAT_LLM_MODEL` |
 | 3 | Bot → MCP server | MCP: JSON-RPC over Streamable HTTP (`POST /mcp`, `Mcp-Session-Id` header) | pod: `http://kubechat-mcp:8080/mcp`<br/>`go run`: `http://localhost:8080/mcp` (NodePort 30080) | none (in-cluster only; NetworkPolicy in v0.4) | `KUBECHAT_MCP_URL` |
 | 4 | MCP server → Kubernetes API | HTTPS (client-go) | in-cluster API server | ServiceAccount `kubechat-mcp`: `view` everywhere + scale Deployments in any namespace (the bot refuses `kube-*` and `kubechat`) | chart `values.yaml` → `mcp.rbac`, `mcp.config` |
@@ -63,7 +63,7 @@ Service, ingress or public URL.
 |---|---|---|
 | MCP server: tools, blocked resources, RBAC | `deploy/helm/kubechat/values.yaml` (`mcp:`) | ConfigMap + RBAC, created by the chart |
 | Bot settings (no secrets) | `deploy/helm/kubechat/values.yaml` (`bot.env`) | ConfigMap `kubechat-bot`, passed as environment variables |
-| Slack tokens (step 7) | `.env` (git-ignored) | Secret `kubechat-slack` |
+| Slack switch and tokens | `.env` (git-ignored); `launch.sh` passes them to the chart | ConfigMap (switch) and Secret `kubechat-bot` (tokens) |
 
 The bot reads its settings from environment variables (`internal/config`):
 
@@ -75,12 +75,13 @@ The bot reads its settings from environment variables (`internal/config`):
 | `KUBECHAT_MCP_URL` | `http://kubechat-mcp:8080/mcp` | the MCP server |
 | `KUBECHAT_PROTECTED_NAMESPACES` | `kube-*,kubechat` | namespaces never changed (comma-separated patterns; code default `kube-*`) |
 | `KUBECHAT_TOOL_TIERS` | `resources_scale=write` | overrides the server's hints (`tool=read\|write\|destructive\|blocked`) |
-| `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | from Secret `kubechat-slack` | Slack tokens (step 7) |
+| `KUBECHAT_SLACK_ENABLED` | `false` | answer @mentions in Slack; `launch.sh` sets `true` when `.env` says so |
+| `KUBECHAT_SLACK_APP_TOKEN`, `KUBECHAT_SLACK_BOT_TOKEN` | placeholders; real values from `.env` | Slack tokens, in Secret `kubechat-bot`; read only when Slack is enabled |
 
 The code's defaults allow no writes: no tool counts as a write until `KUBECHAT_TOOL_TIERS`
 says so. Even then, every change needs an explicit namespace that isn't protected, and
-your Approve click. Steps 7 and 8 add the Slack channel, the
-approver and the approval timeout.
+your Approve click. The Approve/Reject card, with its approver and timeout, is not
+built yet, so for now every write is refused.
 
 When the bot runs with `go run` instead of in a pod, the code's defaults already point
 at `localhost` for Ollama and the MCP server.

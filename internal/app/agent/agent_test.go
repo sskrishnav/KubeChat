@@ -49,7 +49,7 @@ func TestAskRunsToolsThenAnswers(t *testing.T) {
 	}}
 	a := &Agent{LLM: llm, Gate: &fakeGate{output: "fatal: missing DB_URL password=hunter2"}, MaxRounds: 5, MaxOutput: 1000}
 
-	answer, err := a.Ask(context.Background(), "why is demo-crash failing?")
+	answer, err := a.Ask(context.Background(), nil, "why is demo-crash failing?")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,24 @@ func TestAskRunsToolsThenAnswers(t *testing.T) {
 func TestAskStopsAfterMaxRounds(t *testing.T) {
 	llm := &scriptedLLM{replies: []core.Message{toolCall("c1", "pods_log"), toolCall("c2", "pods_log")}}
 	a := &Agent{LLM: llm, Gate: &fakeGate{}, MaxRounds: 2}
-	if _, err := a.Ask(context.Background(), "loop forever"); err == nil {
+	if _, err := a.Ask(context.Background(), nil, "loop forever"); err == nil {
 		t.Error("want an error after MaxRounds")
+	}
+}
+
+func TestAskSendsEarlierMessages(t *testing.T) {
+	llm := &scriptedLLM{replies: []core.Message{{Role: "assistant", Text: "demo-crash: missing DB_URL"}}}
+	a := &Agent{LLM: llm, Gate: &fakeGate{}, MaxRounds: 1}
+	earlier := []core.Message{
+		{Role: "user", Text: "why are pods failing in apps?"},
+		{Role: "assistant", Text: "demo-crash is crash-looping"},
+	}
+	if _, err := a.Ask(context.Background(), earlier, "why is it crashing?"); err != nil {
+		t.Fatal(err)
+	}
+	// What the LLM saw: system, the earlier messages, then the new question.
+	got := llm.seen[0]
+	if len(got) != 4 || got[1].Text != earlier[0].Text || got[2].Text != earlier[1].Text || got[3].Text != "why is it crashing?" {
+		t.Errorf("history = %+v", got)
 	}
 }

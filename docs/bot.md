@@ -193,11 +193,40 @@ main()
  3. build the Agent (above)
  4. was -ask "question" given?
       yes → bot.Ask(question), print the answer, exit
-      no  → log "kubechat started", wait until the pod is stopped
+      no  → log "kubechat started", then:
+              Slack enabled?  yes → slack.Bot.Run: answer @mentions until the pod is stopped
+                              no  → wait until the pod is stopped
 ```
 
-`-ask` is the terminal mode you use for testing. Without it the bot runs as a service and,
-for now, only waits. Slack will plug in here.
+`-ask` is the terminal mode you use for testing. Without it the bot runs as a service.
+Slack is off by default (`KUBECHAT_SLACK_ENABLED=false`).
+
+### Slack (`internal/adapters/slack`)
+
+```
+you: "@KubeChat why are pods failing in apps?"
+        │
+Slack ══ Socket Mode WebSocket (xapp token) ══► slack.Bot.Run
+        │                                        ├─ client.Ack(...)   at once, or Slack resends
+        │                                        └─ go b.answer(...)
+        │                                              ├─ strip "<@U…>" from the text
+        │                                              ├─ thread busy? → "still working…"
+        │                                              ├─ reply "Looking into it…"
+        │                                              ├─ Ask(question)   (the agent; 10 min max)
+        ◄══ chat.postMessage in the thread (xoxb) ═════└─ reply redact.Clean(answer, 3500)
+```
+
+- The bot dials **out** to Slack, so it needs no public URL.
+- **A thread is a conversation.** An @mention starts one: in the mention's thread, or on
+  the mention itself when it's not in a thread. After that, every reply in the thread is a
+  question too, with or without a mention.
+- **The bot remembers the thread.** Each answered question and its answer are kept and
+  sent to the agent as `earlier` with the next question. Only the last 10 are kept, and only
+  in memory, so a restart forgets them. Tool results aren't kept; the model runs the tools
+  again when it needs fresh data.
+- **One question per thread at a time.** A reply that arrives while the bot is still
+  working gets "I'm still working on the last question in this thread."
+- Replies in threads the bot isn't part of, the bot's own messages, and edits are ignored.
 
 ---
 
@@ -561,7 +590,6 @@ go run ./cmd/kubechat -ask "why are pods failing in apps?"
 
 | Piece | Where it plugs in |
 |---|---|
-| **Slack** | `main.go` service mode: a Slack mention calls `Agent.Ask`, and the answer is posted in the thread. A new `adapters/slack` package. |
 | **Approvals** | The gate's "needs approval" branch: post an Approve/Reject card, wait for the click, then run the call or refuse it. |
 
 ---

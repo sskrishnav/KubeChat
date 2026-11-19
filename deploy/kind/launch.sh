@@ -2,7 +2,7 @@
 # Local KubeChat playground on kind. Everything goes into one kind cluster:
 #   kind cluster -> dev/kubeconfig -> namespaces -> metrics-server
 #   -> demo apps (namespace apps) -> bot image -> kubechat chart (namespace kubechat:
-#      MCP server + bot)
+#      MCP server + bot + Slack tokens from .env)
 #
 # Usage:
 #   launch.sh        set up everything (make up)
@@ -36,6 +36,7 @@ BOT_DEPLOYMENT="kubechat-bot"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KUBECONFIG_FILE="$ROOT/dev/kubeconfig"
+ENV_FILE="$ROOT/.env"                     # Slack tokens; git-ignored
 DEMO_DIR="$ROOT/deploy/demo"
 CHART_DIR="$ROOT/deploy/helm/kubechat"
 
@@ -43,12 +44,14 @@ log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # show CMD...: print a command the way you'd type it from the repo root: $ROOT/
-# shortened to a relative path, and arguments with special characters wrapped
-# in single quotes. Goes to stderr so it never ends up in captured output.
+# shortened to a relative path, arguments with special characters wrapped in
+# single quotes, and secrets hidden. Goes to stderr so it never ends up in
+# captured output.
 show() {
   local out="" arg safe='^[A-Za-z0-9_./:=@%+,-]+$' q="'"
   for arg in "$@"; do
     arg="${arg//"$ROOT"\//}"
+    [[ $arg == bot.secretEnv.*=* ]] && arg="${arg%%=*}=<hidden>"
     if [[ $arg =~ $safe ]]; then
       out+="$arg "
     else
@@ -56,6 +59,12 @@ show() {
     fi
   done
   printf '$ %s\n' "${out% }" >&2
+}
+
+# dotenv KEY: KEY's value in .env, or nothing. Reads the file; never runs it.
+dotenv() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1 | tr -d "\"'"
 }
 
 # run CMD...: print the command, then run it.
@@ -195,13 +204,26 @@ install_kubechat() {
   log "fetching chart dependencies (kubernetes-mcp-server)"
   run helm dependency build "$CHART_DIR"
 
+  # Slack is off unless KUBECHAT_SLACK_ENABLED=true, in the environment or .env.
+  # Then the real tokens replace the chart's placeholders.
+  local secret_args=()
+  if [[ "${KUBECHAT_SLACK_ENABLED:-$(dotenv KUBECHAT_SLACK_ENABLED)}" == true ]]; then
+    log "Slack enabled"
+    secret_args=(--set-string bot.env.KUBECHAT_SLACK_ENABLED=true
+      --set-string "bot.secretEnv.KUBECHAT_SLACK_APP_TOKEN=${KUBECHAT_SLACK_APP_TOKEN:-$(dotenv KUBECHAT_SLACK_APP_TOKEN)}"
+      --set-string "bot.secretEnv.KUBECHAT_SLACK_BOT_TOKEN=${KUBECHAT_SLACK_BOT_TOKEN:-$(dotenv KUBECHAT_SLACK_BOT_TOKEN)}")
+  else
+    log "Slack disabled (to enable it, set KUBECHAT_SLACK_ENABLED=true in .env)"
+  fi
+
   log "installing kubechat chart into namespace $KUBECHAT_NAMESPACE"
   run helm upgrade --install "$KUBECHAT_RELEASE" "$CHART_DIR" \
     --kubeconfig "$KUBECONFIG_FILE" \
     --namespace "$KUBECHAT_NAMESPACE" \
     --create-namespace \
     --values "$CHART_DIR/values-kind.yaml" \
-    --set mcpNodePort.nodePort="$MCP_NODE_PORT"
+    --set mcpNodePort.nodePort="$MCP_NODE_PORT" \
+    ${secret_args[@]+"${secret_args[@]}"} # bash 3.2: an empty array is "unbound" under set -u
 
   log "waiting for the MCP server to become ready"
   wait_for_rollout "$KUBECHAT_NAMESPACE" "$MCP_DEPLOYMENT" 300s

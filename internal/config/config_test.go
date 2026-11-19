@@ -51,3 +51,28 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSlack(t *testing.T) {
+	const on, app, bot = "KUBECHAT_SLACK_ENABLED", "KUBECHAT_SLACK_APP_TOKEN", "KUBECHAT_SLACK_BOT_TOKEN"
+
+	c, err := Load(env(map[string]string{app: "xapp-1", bot: "xoxb-1"}))
+	if err != nil || c.SlackEnabled || c.SlackAppToken != "" {
+		t.Errorf("off by default, tokens ignored: got enabled=%v app=%q err=%v", c.SlackEnabled, c.SlackAppToken, err)
+	}
+
+	c, err = Load(env(map[string]string{on: "true", app: "xapp-1", bot: "xoxb-1"}))
+	if err != nil || !c.SlackEnabled || c.SlackAppToken != "xapp-1" || c.SlackBotToken != "xoxb-1" {
+		t.Errorf("enabled: got enabled=%v app=%q bot=%q err=%v", c.SlackEnabled, c.SlackAppToken, c.SlackBotToken, err)
+	}
+
+	for name, vars := range map[string]map[string]string{
+		"enabled, no tokens":      {on: "true"},
+		"enabled, no bot token":   {on: "true", app: "xapp-1"},
+		"enabled, swapped tokens": {on: "true", app: "xoxb-1", bot: "xapp-1"},
+		"not a boolean":           {on: "yes please"},
+	} {
+		if _, err := Load(env(vars)); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}

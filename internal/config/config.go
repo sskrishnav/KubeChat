@@ -18,6 +18,9 @@ type Config struct {
 	MCPURL              string               // KUBECHAT_MCP_URL
 	ProtectedNamespaces []string             // KUBECHAT_PROTECTED_NAMESPACES, e.g. "kube-*,kubechat"
 	ToolTiers           map[string]core.Tier // KUBECHAT_TOOL_TIERS, e.g. "resources_scale=write"
+	SlackEnabled        bool                 // KUBECHAT_SLACK_ENABLED; default false
+	SlackAppToken       string               // KUBECHAT_SLACK_APP_TOKEN (xapp-…); read only when Slack is enabled
+	SlackBotToken       string               // KUBECHAT_SLACK_BOT_TOKEN (xoxb-…); read only when Slack is enabled
 }
 
 // Load reads the settings with getenv (os.Getenv in main, a map in tests).
@@ -65,6 +68,21 @@ func Load(getenv func(string) string) (Config, error) {
 			c.ToolTiers[name] = t
 		default:
 			return Config{}, fmt.Errorf("KUBECHAT_TOOL_TIERS: bad entry %q, want tool=read|write|destructive|blocked", pair)
+		}
+	}
+
+	// Slack is off unless enabled. Errors never include the token values.
+	if c.SlackEnabled, err = strconv.ParseBool(get("KUBECHAT_SLACK_ENABLED", "false")); err != nil {
+		return Config{}, fmt.Errorf("KUBECHAT_SLACK_ENABLED: want true or false")
+	}
+	if c.SlackEnabled {
+		c.SlackAppToken = get("KUBECHAT_SLACK_APP_TOKEN", "")
+		c.SlackBotToken = get("KUBECHAT_SLACK_BOT_TOKEN", "")
+		if !strings.HasPrefix(c.SlackAppToken, "xapp-") {
+			return Config{}, fmt.Errorf("Slack is enabled: KUBECHAT_SLACK_APP_TOKEN must be an app-level token (xapp-…)")
+		}
+		if !strings.HasPrefix(c.SlackBotToken, "xoxb-") {
+			return Config{}, fmt.Errorf("Slack is enabled: KUBECHAT_SLACK_BOT_TOKEN must be a bot token (xoxb-…)")
 		}
 	}
 	return c, nil

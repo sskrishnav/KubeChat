@@ -1,7 +1,7 @@
 // Command kubechat is the KubeChat bot.
 //
 //	kubechat -ask "why are pods failing in apps?"   answer one question and exit
-//	kubechat                                       run as a service
+//	kubechat                                       run as a service (answers in Slack when enabled)
 package main
 
 import (
@@ -15,6 +15,7 @@ import (
 
 	"github.com/sskrishnav/kubechat/internal/adapters/llm"
 	"github.com/sskrishnav/kubechat/internal/adapters/mcp"
+	"github.com/sskrishnav/kubechat/internal/adapters/slack"
 	"github.com/sskrishnav/kubechat/internal/app/agent"
 	"github.com/sskrishnav/kubechat/internal/app/gate"
 	"github.com/sskrishnav/kubechat/internal/app/policy"
@@ -48,7 +49,7 @@ func main() {
 	}
 
 	if *ask != "" {
-		answer, err := bot.Ask(ctx, *ask)
+		answer, err := bot.Ask(ctx, nil, *ask)
 		if err != nil {
 			slog.Error("no answer", "err", err)
 			os.Exit(1)
@@ -59,7 +60,17 @@ func main() {
 
 	slog.Info("kubechat started",
 		"llm", cfg.LLMBaseURL, "model", cfg.LLMModel, "mcp", cfg.MCPURL,
-		"protected_namespaces", cfg.ProtectedNamespaces, "tool_tiers", cfg.ToolTiers)
-	<-ctx.Done() // until Kubernetes stops the pod (SIGTERM) or Ctrl-C
+		"protected_namespaces", cfg.ProtectedNamespaces, "tool_tiers", cfg.ToolTiers,
+		"slack", cfg.SlackEnabled)
+	if cfg.SlackEnabled {
+		chat := &slack.Bot{AppToken: cfg.SlackAppToken, BotToken: cfg.SlackBotToken, Ask: bot.Ask}
+		if err := chat.Run(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("Slack connection failed", "err", err)
+			os.Exit(1)
+		}
+	} else {
+		slog.Info("Slack is disabled: only -ask works (set KUBECHAT_SLACK_ENABLED=true to enable it)")
+		<-ctx.Done() // until Kubernetes stops the pod (SIGTERM) or Ctrl-C
+	}
 	slog.Info("kubechat stopped")
 }

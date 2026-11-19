@@ -33,16 +33,16 @@ type Agent struct {
 	MaxOutput int             // bytes of tool output kept per call
 }
 
-// Ask answers one question.
-func (a *Agent) Ask(ctx context.Context, question string) (string, error) {
+// Ask answers one question. earlier is the conversation so far (the user's
+// questions and the assistant's answers, oldest first), or nil for a new one.
+func (a *Agent) Ask(ctx context.Context, earlier []core.Message, question string) (string, error) {
 	tools, err := a.Gate.List(ctx)
 	if err != nil {
 		return "", err
 	}
-	history := []core.Message{
-		{Role: "system", Text: systemPrompt},
-		{Role: "user", Text: question},
-	}
+	history := []core.Message{{Role: "system", Text: systemPrompt}}
+	history = append(history, earlier...)
+	history = append(history, core.Message{Role: "user", Text: question})
 	for round := 0; round < a.MaxRounds; round++ {
 		reply, err := a.LLM.Complete(ctx, history, tools)
 		if err != nil {

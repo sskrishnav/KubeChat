@@ -9,6 +9,19 @@ data:
   {{ $key }}: {{ $value | quote }}
   {{- end }}
 ---
+{{- with .Values.bot.secretEnv }}
+# The bot's secrets, passed to it as environment variables.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $.Release.Name }}-bot
+type: Opaque
+stringData:
+  {{- range $key, $value := . }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,8 +56,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ .Release.Name }}-bot
-            - secretRef: # Slack tokens; optional until Slack is set up
-                name: {{ .Release.Name }}-slack
+            - secretRef: # from bot.secretEnv; absent when it's empty
+                name: {{ .Release.Name }}-bot
                 optional: true
           securityContext:
             allowPrivilegeEscalation: false
