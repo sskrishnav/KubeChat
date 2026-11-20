@@ -1,7 +1,8 @@
 # MCP tools
 
-The tools KubeChat's MCP server exposes, as reported by the running server (`tools/list`).
-The policy code (read vs write) is based on this list. Re-check it when you upgrade the server.
+The tools KubeChat's MCP servers expose, as reported by the running servers (`tools/list`).
+The policy code (read vs write) is based on this list. Re-check it when you upgrade a server.
+The bot also logs the full list, with each tool's tier, at start-up (`make logs`).
 
 Server: kubernetes-mcp-server **0.1.2** (chart `deploy/helm/kubechat`) · checked 2026-11-13
 
@@ -26,3 +27,31 @@ Server: kubernetes-mcp-server **0.1.2** (chart `deploy/helm/kubechat`) · checke
   can be in the current container's log or in the previous one's (`previous: true`). Try both.
 - How to re-check: `tools/list` against `http://localhost:8080/mcp` (see `check_mcp` in
   `deploy/kind/launch.sh` for the handshake).
+
+## K8sGPT
+
+Server: K8sGPT **v0.4.41** (`templates/k8sgpt.yaml`) · checked 2026-11-20
+
+Every tool reports `readOnly: false, destructive: true`. That is its MCP library's default,
+not a real label. KubeChat counts all of them as **read**, because K8sGPT is in
+`KUBECHAT_MCP_READ_ONLY` and its RBAC can only read (no Secrets).
+
+| Tool | Required args | What it does |
+|---|---|---|
+| `analyze` | — | Rule-based checks (Pods, Deployments, Services, Nodes, PVCs, …) → a list of problems. About 1 second. |
+| `cluster-info` | — | Kubernetes version |
+| `list-namespaces` | — | namespace names |
+| `list-resources` | `resourceType` | list pods, deployments, nodes, … (14 types) |
+| `get-resource` | `resourceType`, `name` | one object, as JSON |
+| `get-logs` | `podName`, `namespace` | container logs (`previous`, `tailLines`) |
+| `list-events` | — | events, filterable by object |
+| `list-filters`, `list-integrations` | — | K8sGPT's analyzers and integrations |
+| `add-filters`, `remove-filters`, `config` | some | change K8sGPT's own settings (lost on restart: they live in an `emptyDir`) |
+
+Notes:
+- `analyze` doesn't read logs. For a crash-looping pod it reports only the last termination
+  reason (`Error`, `OOMKilled`), so the cause still needs `pods_log` or `get-logs`.
+- Cluster-wide `analyze` also lists harmless "ConfigMap not used by any pods" findings.
+- `analyze` with `explain: true` asks an AI backend. KubeChat sets `noopai`, so no data
+  leaves the cluster.
+- `get-resource` and `list-resources` accept Secrets; Kubernetes refuses them (RBAC `view`).

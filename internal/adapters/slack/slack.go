@@ -147,16 +147,14 @@ func (b *Bot) answer(ctx context.Context, api *slack.Client, q question) {
 	answer = redact.Clean(answer, maxAnswer)
 	reply(answer)
 
-	// Release the thread and remember the exchange.
+	// Release the thread and remember the exchange, failures too, so "try again" works.
 	b.mu.Lock()
 	t.busy = false
-	if err == nil {
-		t.history = append(t.history,
-			core.Message{Role: "user", Text: text},
-			core.Message{Role: "assistant", Text: answer})
-		if n := len(t.history); n > maxRemembered {
-			t.history = t.history[n-maxRemembered:]
-		}
+	t.history = append(t.history,
+		core.Message{Role: "user", Text: text},
+		core.Message{Role: "assistant", Text: answer})
+	if n := len(t.history); n > maxRemembered {
+		t.history = t.history[n-maxRemembered:]
 	}
 	b.mu.Unlock()
 }

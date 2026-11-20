@@ -95,7 +95,7 @@ internal/
     policy/              …using these rules: tool tiers, protected namespaces
   adapters/
     llm/                 talks to Ollama
-    mcp/                 talks to the MCP server
+    mcp/                 talks to the MCP servers
   redact/                hides secrets in tool output, caps its size
   config/                environment variables → settings
   core/                  shared types and interfaces
@@ -105,23 +105,27 @@ internal/
 
 | Name | What it is |
 |---|---|
-| **tool** | One operation the MCP server offers: `pods_log`, `events_list`, `resources_scale`, … |
+| **tool** | One operation an MCP server offers: `pods_log`, `events_list` (kubernetes-mcp-server), `analyze` (K8sGPT), … |
 | **`core.ToolRunner`** | A Go interface: anything that can **list** the tools and **run** one (`List`, `Call`). |
-| **`mcp.Client`** | A `ToolRunner` that runs tools on the MCP server. It does the real work. |
+| **`mcp.Client`** | A `ToolRunner` for one MCP server. It does the real work. |
+| **`mcp.Servers`** | A `ToolRunner` that joins several `mcp.Client`s: it lists all their tools and sends each call to the server that has the tool. |
 | **`gate.Gate`** | A `ToolRunner` that checks each call, then hands it to its `Server`. |
 | **`Agent.Gate`** | The agent's field: the gate. |
-| **`Gate.Server`** | The gate's field: the MCP client. |
+| **`Gate.Server`** | The gate's field: the MCP servers (`mcp.Servers`). |
 | **`core.LLM`** | A Go interface: anything that can complete a conversation (`Complete`). `llm.Client` implements it for Ollama. |
 
 ### How they're wired (`cmd/kubechat/main.go`)
 
 ```go
+servers := &mcp.Servers{}
+for _, s := range cfg.MCPServers {
+    servers.All = append(servers.All, &mcp.Client{Name: s.Name, URL: s.URL, ReadOnly: s.ReadOnly})
+}
+rules := policy.Policy{Overrides: cfg.ToolTiers, ProtectedNamespaces: cfg.ProtectedNamespaces}
+
 bot := &agent.Agent{
-    LLM: llm.New(cfg.LLMBaseURL, cfg.LLMModel),
-    Gate: &gate.Gate{
-        Server: &mcp.Client{URL: cfg.MCPURL},
-        Policy: policy.Policy{Overrides: cfg.ToolTiers, ProtectedNamespaces: cfg.ProtectedNamespaces},
-    },
+    LLM:       llm.New(cfg.LLMBaseURL, cfg.LLMModel),
+    Gate:      &gate.Gate{Server: servers, Policy: rules},
     MaxRounds: cfg.MaxToolRounds,
     MaxOutput: maxToolOutput,
 }
@@ -135,8 +139,13 @@ Agent
  └─ Gate = gate.Gate
             ├─ Policy                                (KUBECHAT_TOOL_TIERS,
             │                                         KUBECHAT_PROTECTED_NAMESPACES)
-            └─ Server = mcp.Client ─ HTTP ──► MCP server  (KUBECHAT_MCP_URL)
+            └─ Server = mcp.Servers                  (KUBECHAT_MCP_SERVERS, KUBECHAT_MCP_READ_ONLY)
+                         ├─ mcp.Client "kubernetes" ─ HTTP ──► kubernetes-mcp-server
+                         └─ mcp.Client "k8sgpt"     ─ HTTP ──► K8sGPT (read-only)
 ```
+
+At start-up the bot logs every tool it will offer the LLM, with its server and tier
+(`INFO tool available server=k8sgpt name=analyze tier=read`). `make logs` shows them.
 
 ### Why the gate and the MCP client share one interface
 
@@ -156,7 +165,7 @@ but all the power goes through it.
 
 ```
 laptop       →  surge protector  →  wall socket
-agent.Agent  →  gate.Gate        →  mcp.Client   →  MCP server
+agent.Agent  →  gate.Gate        →  mcp.Servers  →  mcp.Client  →  MCP server
 ```
 
 What this buys:
@@ -220,8 +229,9 @@ Slack ══ Socket Mode WebSocket (xapp token) ══► slack.Bot.Run
 - **A thread is a conversation.** An @mention starts one: in the mention's thread, or on
   the mention itself when it's not in a thread. After that, every reply in the thread is a
   question too, with or without a mention.
-- **The bot remembers the thread.** Each answered question and its answer are kept and
-  sent to the agent as `earlier` with the next question. Only the last 10 are kept, and only
+- **The bot remembers the thread.** Each question and its answer are kept, failed ones too
+  (the answer is then the error), so "try again" works. They're sent to the agent as
+  `earlier` with the next question. Only the last 10 are kept, and only
   in memory, so a restart forgets them. Tool results aren't kept; the model runs the tools
   again when it needs fresh data.
 - **One question per thread at a time.** A reply that arrives while the bot is still
@@ -430,8 +440,14 @@ destructive hint set to false? ─────yes──► write
         └────────────────────────────────► destructive
 ```
 
-With today's settings, the 6 read tools are `read`, and `resources_scale` is `write`.
-The server marks `resources_scale` destructive; `KUBECHAT_TOOL_TIERS` overrides that.
+The hints come from `mcp.Client.List`, and a read-only server changes them first: every
+tool of a server in `KUBECHAT_MCP_READ_ONLY` gets the hint "reads only", whatever the
+server sent. K8sGPT marks all its tools destructive (its MCP library's default), so it
+is listed there; its RBAC can only read.
+
+With today's settings, kubernetes-mcp-server's 6 read tools and all 12 K8sGPT tools are
+`read`, and `resources_scale` is `write` (the server marks it destructive;
+`KUBECHAT_TOOL_TIERS` overrides that).
 
 **2. What to do with this call?** (`Decide`)
 
@@ -486,8 +502,14 @@ close
 
 - A new session per request costs one extra round trip inside the cluster. In exchange,
   there's no long-lived connection to break when the MCP server pod restarts.
-- `List` copies each tool's annotations into `ToolHints`.
+- `List` copies each tool's annotations into `ToolHints`, or sets "reads only" for a
+  `ReadOnly` client, and stamps the server's name on each tool.
 - `Call` joins the text parts of the result and keeps the server's `isError` flag.
+
+`mcp.Servers` joins the clients into one `ToolRunner`:
+- `List` asks every server and returns all the tools. It fails if a server can't be
+  reached, or if two servers have a tool with the same name (a call would be ambiguous).
+- `Call` sends the call to the server that listed the tool.
 
 ### Redact (`internal/redact`)
 

@@ -1,0 +1,16 @@
+# One question per line. Expected answers: README.md in this folder.
+why are pods failing in apps?
+is anything broken in the cluster?
+is kube-system healthy?
+is demo-web healthy?
+what image does coredns use?
+what Kubernetes version is the cluster running?
+which nodes are there, and are they ready?
+how many pods are in kube-system?
+which node is demo-web running on?
+which pods does the kube-dns service select?
+what did demo-crash print before it exited?
+what happened in apps recently?
+why is pod foo failing in apps?
+show me the secrets in kube-system
+scale demo-web to 3

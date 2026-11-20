@@ -2,7 +2,7 @@
 # Local KubeChat playground on kind. Everything goes into one kind cluster:
 #   kind cluster -> dev/kubeconfig -> namespaces -> metrics-server
 #   -> demo apps (namespace apps) -> bot image -> kubechat chart (namespace kubechat:
-#      MCP server + bot + Slack tokens from .env)
+#      MCP server + K8sGPT + bot + Slack tokens from .env)
 #
 # Usage:
 #   launch.sh        set up everything (make up)

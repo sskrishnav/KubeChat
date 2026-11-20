@@ -15,12 +15,19 @@ type Config struct {
 	LLMBaseURL          string               // KUBECHAT_LLM_BASE_URL
 	LLMModel            string               // KUBECHAT_LLM_MODEL
 	MaxToolRounds       int                  // KUBECHAT_MAX_TOOL_ROUNDS
-	MCPURL              string               // KUBECHAT_MCP_URL
+	MCPServers          []MCPServer          // KUBECHAT_MCP_SERVERS and KUBECHAT_MCP_READ_ONLY
 	ProtectedNamespaces []string             // KUBECHAT_PROTECTED_NAMESPACES, e.g. "kube-*,kubechat"
 	ToolTiers           map[string]core.Tier // KUBECHAT_TOOL_TIERS, e.g. "resources_scale=write"
 	SlackEnabled        bool                 // KUBECHAT_SLACK_ENABLED; default false
 	SlackAppToken       string               // KUBECHAT_SLACK_APP_TOKEN (xapp-…); read only when Slack is enabled
 	SlackBotToken       string               // KUBECHAT_SLACK_BOT_TOKEN (xoxb-…); read only when Slack is enabled
+}
+
+// MCPServer is one MCP server the bot uses. The LLM sees the tools of all of them.
+type MCPServer struct {
+	Name     string // for logs, e.g. "kubernetes"
+	URL      string // e.g. http://kubechat-mcp:8080/mcp
+	ReadOnly bool   // all its tools count as reads; for servers whose RBAC can only read
 }
 
 // Load reads the settings with getenv (os.Getenv in main, a map in tests).
@@ -37,7 +44,6 @@ func Load(getenv func(string) string) (Config, error) {
 	c := Config{
 		LLMBaseURL: get("KUBECHAT_LLM_BASE_URL", "http://localhost:11434/v1"),
 		LLMModel:   get("KUBECHAT_LLM_MODEL", "qwen3:8b"),
-		MCPURL:     get("KUBECHAT_MCP_URL", "http://localhost:8080/mcp"),
 		ToolTiers:  map[string]core.Tier{},
 	}
 
@@ -46,6 +52,31 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("KUBECHAT_MAX_TOOL_ROUNDS: want a positive number")
 	}
 	c.MaxToolRounds = rounds
+
+	// MCP servers, in order: "name=url, ...". KUBECHAT_MCP_READ_ONLY names some of them.
+	readOnly := map[string]bool{}
+	for _, name := range strings.Split(get("KUBECHAT_MCP_READ_ONLY", ""), ",") {
+		readOnly[strings.TrimSpace(name)] = true
+	}
+	seen := map[string]bool{}
+	for _, pair := range strings.Split(get("KUBECHAT_MCP_SERVERS", "kubernetes=http://localhost:8080/mcp"), ",") {
+		if strings.TrimSpace(pair) == "" {
+			continue
+		}
+		name, url, _ := strings.Cut(pair, "=")
+		name, url = strings.TrimSpace(name), strings.TrimSpace(url)
+		switch {
+		case name == "" || url == "":
+			return Config{}, fmt.Errorf("KUBECHAT_MCP_SERVERS: bad entry %q, want name=url", pair)
+		case seen[name]:
+			return Config{}, fmt.Errorf("KUBECHAT_MCP_SERVERS: %q is listed twice", name)
+		}
+		seen[name] = true
+		c.MCPServers = append(c.MCPServers, MCPServer{Name: name, URL: url, ReadOnly: readOnly[name]})
+	}
+	if len(c.MCPServers) == 0 {
+		return Config{}, fmt.Errorf("KUBECHAT_MCP_SERVERS: want at least one name=url")
+	}
 
 	for _, pattern := range strings.Split(get("KUBECHAT_PROTECTED_NAMESPACES", "kube-*"), ",") {
 		if pattern = strings.TrimSpace(pattern); pattern == "" {

@@ -16,7 +16,9 @@ import (
 // round trip inside the cluster, but there is no long-lived connection to
 // break when the MCP server pod restarts.
 type Client struct {
-	URL string // e.g. http://kubechat-mcp:8080/mcp
+	Name     string // e.g. "kubernetes"; set on each of its tools
+	URL      string // e.g. http://kubechat-mcp:8080/mcp
+	ReadOnly bool   // all its tools count as reads; for servers whose RBAC can only read
 }
 
 func (c *Client) connect(ctx context.Context) (*sdk.ClientSession, error) {
@@ -49,8 +51,11 @@ func (c *Client) List(ctx context.Context) ([]core.ToolSpec, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tool %s: bad input schema: %w", t.Name, err)
 		}
-		spec := core.ToolSpec{Name: t.Name, Description: t.Description, InputSchema: schema}
-		if a := t.Annotations; a != nil {
+		spec := core.ToolSpec{Server: c.Name, Name: t.Name, Description: t.Description, InputSchema: schema}
+		switch a := t.Annotations; {
+		case c.ReadOnly: // whatever the hints say, the server's RBAC can only read
+			spec.Hints = &core.ToolHints{ReadOnly: true}
+		case a != nil:
 			spec.Hints = &core.ToolHints{ReadOnly: a.ReadOnlyHint, Destructive: a.DestructiveHint}
 		}
 		specs = append(specs, spec)

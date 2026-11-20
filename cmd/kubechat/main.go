@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/sskrishnav/kubechat/internal/adapters/llm"
 	"github.com/sskrishnav/kubechat/internal/adapters/mcp"
@@ -20,6 +21,7 @@ import (
 	"github.com/sskrishnav/kubechat/internal/app/gate"
 	"github.com/sskrishnav/kubechat/internal/app/policy"
 	"github.com/sskrishnav/kubechat/internal/config"
+	"github.com/sskrishnav/kubechat/internal/core"
 )
 
 const maxToolOutput = 20000 // bytes of each tool result sent to the LLM
@@ -37,13 +39,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Wiring: the agent only ever sees the gate; only the gate sees the MCP server.
+	servers := &mcp.Servers{}
+	for _, s := range cfg.MCPServers {
+		servers.All = append(servers.All, &mcp.Client{Name: s.Name, URL: s.URL, ReadOnly: s.ReadOnly})
+	}
+	rules := policy.Policy{Overrides: cfg.ToolTiers, ProtectedNamespaces: cfg.ProtectedNamespaces}
+
+	// Wiring: the agent only ever sees the gate; only the gate sees the MCP servers.
 	bot := &agent.Agent{
-		LLM: llm.New(cfg.LLMBaseURL, cfg.LLMModel),
-		Gate: &gate.Gate{
-			Server: &mcp.Client{URL: cfg.MCPURL},
-			Policy: policy.Policy{Overrides: cfg.ToolTiers, ProtectedNamespaces: cfg.ProtectedNamespaces},
-		},
+		LLM:       llm.New(cfg.LLMBaseURL, cfg.LLMModel),
+		Gate:      &gate.Gate{Server: servers, Policy: rules},
 		MaxRounds: cfg.MaxToolRounds,
 		MaxOutput: maxToolOutput,
 	}
@@ -59,9 +64,11 @@ func main() {
 	}
 
 	slog.Info("kubechat started",
-		"llm", cfg.LLMBaseURL, "model", cfg.LLMModel, "mcp", cfg.MCPURL,
+		"llm", cfg.LLMBaseURL, "model", cfg.LLMModel, "mcp_servers", cfg.MCPServers,
 		"protected_namespaces", cfg.ProtectedNamespaces, "tool_tiers", cfg.ToolTiers,
 		"slack", cfg.SlackEnabled)
+
+	go logTools(ctx, bot.Gate, rules)
 	if cfg.SlackEnabled {
 		chat := &slack.Bot{AppToken: cfg.SlackAppToken, BotToken: cfg.SlackBotToken, Ask: bot.Ask}
 		if err := chat.Run(ctx); err != nil && ctx.Err() == nil {
@@ -73,4 +80,25 @@ func main() {
 		<-ctx.Done() // until Kubernetes stops the pod (SIGTERM) or Ctrl-C
 	}
 	slog.Info("kubechat stopped")
+}
+
+// logTools logs the tools the LLM gets and the tier the gate gives each one.
+// The MCP servers may still be starting, so it tries for about a minute.
+func logTools(ctx context.Context, runner core.ToolRunner, rules policy.Policy) {
+	var err error
+	for range 12 {
+		var tools []core.ToolSpec
+		if tools, err = runner.List(ctx); err == nil {
+			for _, t := range tools {
+				slog.Info("tool available", "server", t.Server, "name", t.Name, "tier", rules.Tier(t))
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
+	slog.Warn("can't list the tools; trying again on every question", "err", err)
 }

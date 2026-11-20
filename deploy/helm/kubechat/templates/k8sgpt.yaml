@@ -1,0 +1,98 @@
+{{- if .Values.k8sgpt.enabled }}
+# K8sGPT's MCP server: rule-based checks of the cluster (analyze) and read tools.
+# It may only read: "view" (no Secrets) plus cluster-read below.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-k8sgpt
+---
+# Cluster-wide objects that "view" leaves out. Read only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-cluster-read
+rules:
+  - apiGroups: [""]
+    resources: [nodes, persistentvolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations]
+    verbs: [get, list, watch]
+---
+{{- range $role := list "view" (printf "%s-cluster-read" $.Release.Name) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $.Release.Name }}-k8sgpt-{{ trimPrefix (printf "%s-" $.Release.Name) $role }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $role }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Release.Name }}-k8sgpt
+    namespace: {{ $.Release.Namespace }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-k8sgpt
+  labels:
+    app.kubernetes.io/name: kubechat-k8sgpt
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubechat-k8sgpt
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubechat-k8sgpt
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-k8sgpt
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: k8sgpt
+          image: "{{ .Values.k8sgpt.image.repository }}:{{ .Values.k8sgpt.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          args: [serve, --mcp, --mcp-http, --mcp-port, "8089"]
+          env:
+            - name: K8SGPT_BACKEND # serve won't start without an AI backend; KubeChat never asks it to explain
+              value: noopai
+            - name: XDG_CONFIG_HOME # K8sGPT writes its config and cache here; /k8sgpt is the program itself
+              value: /k8sgpt-config
+            - name: XDG_CACHE_HOME
+              value: /k8sgpt-config
+          ports:
+            - { name: mcp, containerPort: 8089 }
+          volumeMounts:
+            - { name: data, mountPath: /k8sgpt-config }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            {{- toYaml .Values.k8sgpt.resources | nindent 12 }}
+      volumes:
+        - { name: data, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-k8sgpt
+spec:
+  selector:
+    app.kubernetes.io/name: kubechat-k8sgpt
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - { name: mcp, port: 8089, targetPort: mcp }
+{{- end }}

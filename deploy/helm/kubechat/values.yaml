@@ -55,7 +55,10 @@ bot:
     KUBECHAT_LLM_BASE_URL: http://host.docker.internal:11434/v1 # Ollama on the host (Docker Desktop)
     KUBECHAT_LLM_MODEL: qwen3:8b
     KUBECHAT_MAX_TOOL_ROUNDS: "8"
-    KUBECHAT_MCP_URL: http://kubechat-mcp:8080/mcp
+    # Every MCP server the bot uses, as name=url; the LLM sees all their tools.
+    # Drop k8sgpt here if k8sgpt.enabled is false.
+    KUBECHAT_MCP_SERVERS: kubernetes=http://kubechat-mcp:8080/mcp, k8sgpt=http://kubechat-k8sgpt:8089/mcp
+    KUBECHAT_MCP_READ_ONLY: k8sgpt # all its tools count as reads (they all say "destructive"); its RBAC can only read
     KUBECHAT_PROTECTED_NAMESPACES: "kube-*,kubechat" # never changed; kubechat = the bot's own namespace
     KUBECHAT_TOOL_TIERS: resources_scale=write # the server marks it destructive; the MVP treats it as a write
     KUBECHAT_SLACK_ENABLED: "false" # "true" needs the Slack tokens in secretEnv
@@ -63,6 +66,16 @@ bot:
   secretEnv:
     KUBECHAT_SLACK_APP_TOKEN: "xapp-***" # placeholder
     KUBECHAT_SLACK_BOT_TOKEN: "xoxb-***" # placeholder
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# -- K8sGPT's MCP server (templates/k8sgpt.yaml). When enabled, the bot uses its tools too.
+k8sgpt:
+  enabled: true
+  image:
+    repository: ghcr.io/k8sgpt-ai/k8sgpt
+    tag: v0.4.41
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 256Mi }

@@ -38,6 +38,38 @@ func TestLoadDefaultsAreSafe(t *testing.T) {
 	if !slices.Equal(c.ProtectedNamespaces, []string{"kube-*"}) {
 		t.Errorf("default ProtectedNamespaces = %v, want [kube-*]", c.ProtectedNamespaces)
 	}
+	want := []MCPServer{{Name: "kubernetes", URL: "http://localhost:8080/mcp"}}
+	if !slices.Equal(c.MCPServers, want) {
+		t.Errorf("default MCPServers = %+v, want %+v (one server, not read-only)", c.MCPServers, want)
+	}
+}
+
+func TestLoadMCPServers(t *testing.T) {
+	c, err := Load(env(map[string]string{
+		"KUBECHAT_MCP_SERVERS":   " kubernetes=http://kubechat-mcp:8080/mcp , k8sgpt=http://kubechat-k8sgpt:8089/mcp?a=b ,",
+		"KUBECHAT_MCP_READ_ONLY": "k8sgpt",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []MCPServer{
+		{Name: "kubernetes", URL: "http://kubechat-mcp:8080/mcp"},
+		{Name: "k8sgpt", URL: "http://kubechat-k8sgpt:8089/mcp?a=b", ReadOnly: true},
+	}
+	if !slices.Equal(c.MCPServers, want) {
+		t.Errorf("MCPServers = %+v, want %+v", c.MCPServers, want)
+	}
+
+	for _, servers := range []string{
+		",",                             // none
+		"http://kubechat-mcp/mcp",       // no name
+		"kubernetes=",                   // no URL
+		"a=http://x/mcp,a=http://y/mcp", // the same name twice
+	} {
+		if _, err := Load(env(map[string]string{"KUBECHAT_MCP_SERVERS": servers})); err == nil {
+			t.Errorf("KUBECHAT_MCP_SERVERS=%q: want an error", servers)
+		}
+	}
 }
 
 func TestLoadRejectsBadValues(t *testing.T) {

@@ -15,6 +15,7 @@ type Message struct {
 
 // ToolSpec describes one tool, as listed by the MCP server.
 type ToolSpec struct {
+	Server      string // the MCP server that has it, e.g. "k8sgpt"; for logs
 	Name        string
 	Description string
 	InputSchema json.RawMessage // JSON Schema of the arguments

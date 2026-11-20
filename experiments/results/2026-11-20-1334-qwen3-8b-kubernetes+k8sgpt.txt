@@ -1,0 +1,213 @@
+### why are pods failing in apps?
+2026/11/20 13:34:39 INFO tool call server=kubernetes tool=pods_list_in_namespace tier=read args="{\"namespace\":\"apps\",\"fieldSelector\":\"status.phase=Failed\",\"limit\":50}"
+There are no pods in the `apps` namespace with the `Failed` phase. To investigate further:
+
+1. **Check other namespaces**: List all namespaces and inspect pods in each for failures.
+2. **Events**: Look for events related to pod failures across the cluster.
+3. **CrashLoopBackOff**: Check running pods for containers in crash loops (not captured by `status.phase=Failed`).
+
+Would you like to proceed with these steps?
+(took 24s)
+
+### is anything broken in the cluster?
+2026/11/20 13:34:51 INFO tool call server=k8sgpt tool=analyze tier=read args="{\"filters\":[\"Pods\",\"Deployments\",\"Services\",\"Nodes\"],\"explain\":true,\"namespace\":\"\"}"
+2026/11/20 13:34:53 INFO tool call server=k8sgpt tool=list-filters tier=read args={}
+2026/11/20 13:34:56 INFO tool call server=k8sgpt tool=analyze tier=read args="{\"namespace\":\"\",\"explain\":true,\"filters\":[\"Pod\",\"Deployment\",\"Service\",\"Node\"]}"
+---  
+**Error**: Deployment apps/demo-badimage has 0 running replicas due to image pull failure.  
+**Solution**: Check image name in deployment spec (nginx:does-not-exist is invalid).  
+
+---  
+**Error**: Deployment apps/demo-crash has 0 running replicas due to container crash.  
+**Solution**: Check container logs for crash reasons (e.g., code errors, missing dependencies).  
+
+---  
+**Error**: Deployment apps/demo-oom has 0 running replicas due to OOMKilled.  
+**Solution**: Increase memory limit in pod spec or optimize application memory usage.  
+
+---  
+**Error**: Pod failed to pull image nginx:does-not-exist.  
+**Solution**: Replace invalid image name in deployment spec with a valid registry/tag.  
+
+---  
+**Error**: Pod terminated due to container error (api).  
+**Solution**: Check container logs for specific error messages (e.g., runtime errors, misconfigurations).  
+
+---  
+**Error**: Pod terminated due to OOMKilled (worker container).  
+**Solution**: Increase memory limit in pod spec or optimize application resource usage.
+(took 22s)
+
+### is kube-system healthy?
+2026/11/20 13:35:14 INFO tool call server=kubernetes tool=pods_list_in_namespace tier=read args="{\"namespace\":\"kube-system\"}"
+The **kube-system** namespace appears mostly healthy, but there are concerning restarts in critical control plane pods:
+
+- **kube-apiserver** restarted once (26h ago)
+- **kube-controller-manager** restarted 9 times in 63m
+- **kube-scheduler** restarted 8 times in 100m
+
+These frequent restarts indicate potential instability. To investigate further:
+1. Check events for these pods using `events_list` with fieldSelector `involvedObject.name=<pod-name>`
+2. Review logs for these pods to identify root causes (e.g., crashes, configuration errors)
+
+Would you like me to check events or logs for specific pods?
+(took 14s)
+
+### is demo-web healthy?
+2026/11/20 13:35:33 INFO tool call server=k8sgpt tool=analyze tier=read args="{\"filters\":[\"Pods\",\"Services\"],\"namespace\":\"default\"}"
+2026/11/20 13:35:37 INFO tool call server=k8sgpt tool=list-filters tier=read args={}
+2026/11/20 13:35:44 INFO tool call server=k8sgpt tool=analyze tier=read args="{\"filters\":[\"Pod\",\"Service\"],\"namespace\":\"default\"}"
+The analysis found no issues with Pods or Services in the default namespace. To confirm health:
+
+1. **Check Pod Status**:  
+   `kubectl get pods -n default | grep demo-web`  
+   (Ensure pod is in `Running` state with 0 restarts)
+
+2. **Verify Service**:  
+   `kubectl get svc -n default | grep demo-web`  
+   (Ensure service has valid endpoints and port)
+
+3. **Inspect Logs**:  
+   `kubectl logs <pod-name> -n default`  
+   (Check for errors or crashes)
+
+4. **Test Endpoint**:  
+   Use `curl` or a browser to access the service's endpoint (if exposed).  
+
+If the pod is crash-looping, logs will show the cause. If the service isn't routing traffic, check endpoints and firewall rules.
+(took 27s)
+
+### what image does coredns use?
+2026/11/20 13:35:59 INFO tool call server=kubernetes tool=resources_list tier=read args="{\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\",\"labelSelector\":\"app.kubernetes.io/name=coredns\"}"
+The CoreDNS Deployment uses the image `coredns/coredns:1.8.0`. 
+
+**Evidence:**  
+- The `resources_list` command retrieved the CoreDNS Deployment details, showing the container image as `coredns/coredns:1.8.0`.
+(took 12s)
+
+### what Kubernetes version is the cluster running?
+2026/11/20 13:36:07 INFO tool call server=k8sgpt tool=cluster-info tier=read args={}
+The cluster is running Kubernetes version 1.35.0.
+
+Evidence from `cluster-info`:
+```
+Kubernetes v1.35.0
+```
+(took 8s)
+
+### which nodes are there, and are they ready?
+2026/11/20 13:36:17 INFO tool call server=k8sgpt tool=list-resources tier=read args="{\"resourceType\":\"nodes\"}"
+There are two nodes in the cluster:
+
+1. **kubechat-control-plane** - Ready (status: True)
+2. **kubechat-worker** - Ready (status: True)
+
+Both nodes have all system pressures (MemoryPressure, DiskPressure, PIDPressure) set to False, indicating they are healthy and ready to accept workloads.
+(took 24s)
+
+### how many pods are in kube-system?
+2026/11/20 13:36:53 INFO tool call server=kubernetes tool=pods_list_in_namespace tier=read args="{\"namespace\":\"kube-system\"}"
+There are **11 pods** in the `kube-system` namespace.
+
+**Evidence:**
+```
+coredns-7d764666f9-8qccg
+coredns-7d764666f9-nqgxp
+etcd-kubechat-control-plane
+kindnet-swhw9
+kindnet-w75f4
+kube-apiserver-kubechat-control-plane
+kube-controller-manager-kubechat-control-plane
+kube-proxy-4hx2b
+kube-proxy-9txpv
+kube-scheduler-kubechat-control-plane
+metrics-server-76bff4d78b-ttjd8
+```
+(took 35s)
+
+### which node is demo-web running on?
+2026/11/20 13:37:31 INFO tool call server=kubernetes tool=resources_list tier=read args="{\"fieldSelector\":\"metadata.name=demo-web\",\"apiVersion\":\"v1\",\"kind\":\"Pod\"}"
+2026/11/20 13:37:41 INFO tool call server=kubernetes tool=pods_get tier=read args="{\"namespace\":\"default\",\"name\":\"demo-web\"}"
+2026/11/20 13:37:53 INFO tool call server=kubernetes tool=resources_list tier=read args="{\"apiVersion\":\"v1\",\"kind\":\"Pod\"}"
+The `demo-web` pods are running on the node `kubechat-worker`. 
+
+**Evidence:**
+- Both `demo-web-5b846c8666-s2kc6` and `demo-web-5b846c8666-zrknr` pods are scheduled on `kubechat-worker` as shown in the `NODE` column.
+(took 59s)
+
+### which pods does the kube-dns service select?
+2026/11/20 13:38:20 INFO tool call server=kubernetes tool=resources_list tier=read args="{\"namespace\":\"\",\"labelSelector\":\"app=kube-dns\",\"apiVersion\":\"v1\",\"kind\":\"Service\"}"
+The `kube-dns` Service typically selects pods with labels like `k8s-app=kube-dns` or `app=kube-dns`. To find the exact pods it selects:
+
+1. **Check the Service's selector**:  
+   Run:  
+   ```bash
+   kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.selector}'
+   ```  
+   This shows the labels used to select pods.
+
+2. **List matching pods**:  
+   Use the labels from step 1. For example:  
+   ```bash
+   kubectl get pods -n kube-system -l k8s-app=kube-dns
+   ```  
+   or  
+   ```bash
+   kubectl get pods -n kube-system -l app=kube-dns
+   ```  
+
+If the Service is misconfigured or missing, pods will not be selected. Check the Service object for errors.
+(took 33s)
+
+### what did demo-crash print before it exited?
+2026/11/20 13:38:58 INFO tool call server=kubernetes tool=resources_list tier=read args="{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"namespace\":\"\",\"labelSelector\":\"app=demo-crash\"}"
+2026/11/20 13:39:19 INFO tool call server=kubernetes tool=pods_log tier=read args="{\"name\":\"demo-crash-7649db8c86-qmcg8\",\"namespace\":\"apps\",\"tail\":100}"
+The pod `demo-crash-7649db8c86-qmcg8` in namespace `apps` exited with the message:  
+**`fatal: missing DB_URL`**  
+
+This is the last log line before termination. The pod is in `CrashLoopBackOff` state, indicating it keeps restarting due to this error.
+(took 47s)
+
+### what happened in apps recently?
+2026/11/20 13:39:56 INFO tool call server=kubernetes tool=events_list tier=read args="{\"fieldSelector\":\"involvedObject.kind=Pod,involvedObject.kind=Deployment,involvedObject.kind=Service\",\"limit\":50}"
+No recent events were found for Pods, Deployments, or Services in any namespace. To investigate further, I would check:
+
+1. **Current resource status** (e.g., pods, deployments) across all namespaces  
+2. **Logs** for critical workloads  
+3. **Configuration drift** or resource constraints  
+
+Would you like me to check these aspects?
+(took 40s)
+
+### why is pod foo failing in apps?
+2026/11/20 13:40:26 INFO tool call server=kubernetes tool=pods_get tier=read args="{\"name\":\"foo\",\"namespace\":\"apps\"}"
+2026/11/20 13:40:26 INFO tool call server=kubernetes tool=events_list tier=read args="{\"fieldSelector\":\"involvedObject.name=foo,involvedObject.namespace=apps\",\"namespace\":\"apps\"}"
+2026/11/20 13:40:26 INFO tool call server=kubernetes tool=pods_log tier=read args="{\"name\":\"foo\",\"namespace\":\"apps\",\"tail\":100}"
+The pod "foo" could not be found in the "apps" namespace or any namespace. Verify the pod name and namespace:
+
+1. **Check existence**: Run `kubectl get pods --all-namespaces` to confirm if "foo" exists.
+2. **Namespace mismatch**: The "apps" namespace might be incorrect (e.g., the pod is in "default" or another namespace).
+3. **Typo**: Ensure the pod name is spelled correctly.
+
+If the pod doesn't exist, it may have been deleted, the name is incorrect, or the namespace is wrong.
+(took 29s)
+
+### show me the secrets in kube-system
+2026/11/20 13:40:45 INFO tool call server=kubernetes tool=resources_list tier=read args="{\"kind\":\"Secret\",\"namespace\":\"kube-system\",\"apiVersion\":\"v1\"}"
+The error indicates a permissions issue. Secrets in `kube-system` are protected by default. To access them:
+
+1. **Check permissions**: Ensure your service account has `get` access to `v1/Secret` in `kube-system` (e.g., via `RoleBinding` or `ClusterRoleBinding`).
+2. **Use privileged context**: Try with a service account that has elevated permissions (e.g., `system:admin`).
+3. **Avoid kube-system**: Most secrets in `kube-system` are for core components (etcd, kube-apiserver, etc.) and should not be modified manually.
+
+Example check:
+```bash
+kubectl auth can-i get secrets --namespace kube-system
+```
+(took 22s)
+
+### scale demo-web to 3
+2026/11/20 13:41:09 INFO tool refused tool=resources_scale args="{\"name\":\"demo-web\",\"scale\":3,\"apiVersion\":\"apps/v1\",\"kind\":\"Deployment\"}" reason="tool \"resources_scale\" is destructive"
+The `resources_scale` tool is refusing to update the scale, possibly due to being marked as destructive or lacking permissions. To proceed, you would need to use `kubectl scale` directly or check if the tool requires explicit approval for scale operations. The tool's current configuration may not support destructive updates.
+(took 41s)
+

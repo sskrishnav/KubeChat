@@ -57,7 +57,7 @@ func (g *Gate) Call(ctx context.Context, call core.ToolCall) (core.ToolResult, e
 		return refuse(call, "this change needs human approval, which is not available yet")
 	}
 
-	slog.Info("tool call", "tool", call.Name, "tier", d.Tier, "args", string(call.Args))
+	slog.Info("tool call", "server", spec.Server, "tool", call.Name, "tier", d.Tier, "args", string(call.Args))
 	return g.Server.Call(ctx, call)
 }
 
