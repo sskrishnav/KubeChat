@@ -473,7 +473,7 @@ One HTTP call: `POST {KUBECHAT_LLM_BASE_URL}/chat/completions`.
 ```
 request                                   reply
 {                                         { "choices": [ { "message": {
-  "model": "qwen3:8b",                        "role": "assistant",
+  "model": "qwen3:14b",                       "role": "assistant",
   "temperature": 0,                           "content": "",
   "messages": [ …the history… ],              "tool_calls": [ {
   "tools": [ { "type": "function",              "id": "call_1",

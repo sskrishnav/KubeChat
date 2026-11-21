@@ -43,7 +43,7 @@ func Load(getenv func(string) string) (Config, error) {
 
 	c := Config{
 		LLMBaseURL: get("KUBECHAT_LLM_BASE_URL", "http://localhost:11434/v1"),
-		LLMModel:   get("KUBECHAT_LLM_MODEL", "qwen3:8b"),
+		LLMModel:   get("KUBECHAT_LLM_MODEL", "qwen3:14b"),
 		ToolTiers:  map[string]core.Tier{},
 	}
 

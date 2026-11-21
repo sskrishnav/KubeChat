@@ -53,7 +53,7 @@ bot:
   # Settings, passed as environment variables (read by internal/config).
   env:
     KUBECHAT_LLM_BASE_URL: http://host.docker.internal:11434/v1 # Ollama on the host (Docker Desktop)
-    KUBECHAT_LLM_MODEL: qwen3:8b
+    KUBECHAT_LLM_MODEL: qwen3:14b # best score in experiments/README.md; qwen3:8b is ~3x faster but often wrong
     KUBECHAT_MAX_TOOL_ROUNDS: "8"
     # Every MCP server the bot uses, as name=url; the LLM sees all their tools.
     # Drop k8sgpt here if k8sgpt.enabled is false.

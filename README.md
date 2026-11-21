@@ -6,7 +6,7 @@ It reads the cluster through MCP servers (kubernetes-mcp-server and K8sGPT) and 
 Needs: Docker, kind, kubectl, helm, Ollama.
 
 ```bash
-ollama pull qwen3:8b
+ollama pull qwen3:14b   # 9 GB
 git clone https://github.com/sskrishnav/KubeChat.git && cd KubeChat
 make up      # kind cluster + demo apps + MCP server + bot, about 3 minutes
 ```

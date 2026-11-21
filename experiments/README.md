@@ -53,3 +53,4 @@ Pass: the right facts and nothing invented. Partial: some right facts, or right 
 | 2026-11-20 | qwen3:8b | kubernetes + k8sgpt | 7/15 (+4 partial) | Never calls `analyze`. K8sGPT answers version and nodes. |
 | 2026-11-20 | qwen3:14b | kubernetes + k8sgpt | 8/15 (+2 partial) | About 1.7 times slower. Still assumes `default` and invents. |
 | 2026-11-20 | qwen3:8b | kubernetes + k8sgpt | 9/15 (+1 partial) | New prompt rules: "check for problems first" and "search all namespaces". Uses `analyze` (question 2) and finds demo-web and `DB_URL` across namespaces (questions 9, 11). About 30s per question. |
+| 2026-11-20 | qwen3:14b | kubernetes + k8sgpt | 11/15 (+3 partial) | Same new prompt. Only fail: question 4 (mixed up demo-web with demo-badimage). Invented nothing. About 90s per question (17–304s). |

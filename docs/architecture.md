@@ -74,7 +74,7 @@ The bot reads its settings from environment variables (`internal/config`):
 | Variable | Chart value | Meaning |
 |---|---|---|
 | `KUBECHAT_LLM_BASE_URL` | `http://host.docker.internal:11434/v1` | Ollama's OpenAI-compatible API |
-| `KUBECHAT_LLM_MODEL` | `qwen3:8b` | model name in Ollama |
+| `KUBECHAT_LLM_MODEL` | `qwen3:14b` | model name in Ollama (chosen by score: `experiments/README.md`) |
 | `KUBECHAT_MAX_TOOL_ROUNDS` | `8` | most LLM ↔ tool round trips per question |
 | `KUBECHAT_MCP_SERVERS` | `kubernetes=http://kubechat-mcp:8080/mcp, k8sgpt=http://kubechat-k8sgpt:8089/mcp` | every MCP server, as `name=url`; the LLM gets all their tools (code default: `kubernetes=http://localhost:8080/mcp`) |
 | `KUBECHAT_MCP_READ_ONLY` | `k8sgpt` | servers whose tools all count as reads, whatever their hints say; only for servers whose RBAC can only read |
