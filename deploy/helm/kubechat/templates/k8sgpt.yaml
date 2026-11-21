@@ -1,32 +1,16 @@
 {{- if .Values.k8sgpt.enabled }}
 # K8sGPT's MCP server: rule-based checks of the cluster (analyze) and read tools.
-# It may only read: "view" (no Secrets) plus cluster-read below.
+# It may only read: "view" (no Secrets) plus kubechat-cluster-read (templates/cluster-read.yaml).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ .Release.Name }}-k8sgpt
 ---
-# Cluster-wide objects that "view" leaves out. Read only.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ .Release.Name }}-cluster-read
-rules:
-  - apiGroups: [""]
-    resources: [nodes, persistentvolumes]
-    verbs: [get, list, watch]
-  - apiGroups: [storage.k8s.io]
-    resources: [storageclasses]
-    verbs: [get, list, watch]
-  - apiGroups: [admissionregistration.k8s.io]
-    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations]
-    verbs: [get, list, watch]
----
-{{- range $role := list "view" (printf "%s-cluster-read" $.Release.Name) }}
+{{- range $role := list "view" "kubechat-cluster-read" }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $.Release.Name }}-k8sgpt-{{ trimPrefix (printf "%s-" $.Release.Name) $role }}
+  name: {{ $.Release.Name }}-k8sgpt-{{ trimPrefix "kubechat-" $role }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

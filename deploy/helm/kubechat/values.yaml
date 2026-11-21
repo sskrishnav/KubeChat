@@ -27,7 +27,8 @@ mcp:
       - { group: "", version: "v1", kind: "Secret" }
 
   # What the server's ServiceAccount may do, enforced by Kubernetes.
-  # Reads: almost everything ("view" excludes Secrets). Writes: scale deployments
+  # Reads: almost everything ("view" excludes Secrets) plus nodes, PVs, storage classes and
+  # webhooks (kubechat-cluster-read, templates/cluster-read.yaml). Writes: scale deployments
   # in any namespace. The bot refuses protected namespaces (bot.env
   # KUBECHAT_PROTECTED_NAMESPACES) and asks a human before every other change.
   rbac:
@@ -40,6 +41,8 @@ mcp:
     extraClusterRoleBindings:
       - name: view
         roleRef: { name: view, external: true }
+      - name: cluster-read
+        roleRef: { name: kubechat-cluster-read, external: true }
       - name: scale
         roleRef: { name: scale }
 
