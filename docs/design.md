@@ -1,200 +1,84 @@
-# KubeChat — Design
+# KubeChat: design
 
-Slack-driven Kubernetes debugging via MCP · 11 Nov 2026 · @Krishna
+Slack-driven Kubernetes debugging via MCP · v0.1.0 · 26 Nov 2026 · @Krishna
 
-## 1. Idea
+## Idea
 
-KubeChat is one small Go service that turns a Slack channel into a chat front-end for a Kubernetes cluster. You ask a question in plain language ("why is checkout crashlooping?") and it answers from live cluster data: pods, events, logs, resources and metrics. When it wants to change something, it posts an approval card, and nothing changes until a human clicks **Approve**.
+KubeChat is a small Go bot that answers questions about a Kubernetes cluster in plain
+English ("why are pods failing in apps?"), in Slack or the terminal. It answers from live
+cluster data, read through MCP servers, with a local LLM. **v0.1.0 is read-only:** it
+never changes the cluster.
 
-It reuses existing open-source pieces for everything that already exists:
+It reuses existing projects and adds only the bot, the agent loop and the consent gate:
 
-| Need | Reused project |
+| Need | Project |
 |---|---|
-| All Kubernetes access | [containers/kubernetes-mcp-server](https://github.com/containers/kubernetes-mcp-server), run twice: a **reader** and a **writer** |
-| Health scans | [K8sGPT](https://github.com/k8sgpt-ai/k8sgpt) analyzers through its MCP server |
-| LLM | Local model on [Ollama](https://ollama.com), through its OpenAI-compatible `/v1` API |
+| Kubernetes access | [kubernetes-mcp-server](https://github.com/containers/kubernetes-mcp-server) |
+| Rule-based health checks | [K8sGPT](https://github.com/k8sgpt-ai/k8sgpt) analyzers, through its MCP server |
+| LLM | [Ollama](https://ollama.com) on the laptop, OpenAI-compatible `/v1` API |
 
-KubeChat adds only what no maintained project provides: the **Slack bot**, the **agent loop**, and a **consent gate**.
+> **Core rule: the LLM never holds write access.** Every tool call goes through the
+> consent gate. There is no bypass, not even for debugging.
 
-> **Core rule: the LLM never holds write access.**
-> Reads run straight away. A write becomes an approval card in Slack. Only the gate, after a human clicks Approve, calls the separate write-scoped MCP server.
+## What v0.1.0 has
 
-### Goals (v1)
-- Answer debugging questions in Slack, grounded in live cluster data.
-- Run one-shot health scans on demand (`/k8s health`).
-- Propose fixes (scale, restart, image bump) and run them only after explicit approval of the exact change shown.
-- Keep a full audit trail: who asked, what ran, who approved.
-- Run in-cluster with no public ingress (Slack Socket Mode).
+- **Slack**, optional and off by default: Socket Mode (no public URL). An @mention starts a thread,
+  and replies in the thread are follow-up questions with the earlier ones as context.
+- **Terminal:** `kubechat -ask "…"`.
+- **Agent loop:** the LLM asks for tools, the gate runs them, until it answers. The prompt is a
+  general way to investigate, not hints for particular faults.
+- **MCP servers from config** (`KUBECHAT_MCP_SERVERS`): kubernetes-mcp-server and K8sGPT.
+  The LLM gets all their tools and picks.
+- **Consent gate:** each tool gets a tier (read, write, destructive, blocked) from the
+  server's hints, config overrides, or a read-only server setting. Reads run; everything
+  else is refused for now.
+- **One Helm chart** (MCP server, K8sGPT, bot) and a kind playground with three planted
+  faults: `make up`.
+- **Experiments** (`experiments/`): 15 questions of different kinds, scored after every
+  change to the model, the prompt or the tools.
 
-### Non-goals (v1)
-- No autonomous or alert-triggered fixes.
-- No access to Secret contents.
-- No web UI; Slack is the only interface, plus a CLI for development.
-- No multi-tenant setup; this is for one team and one to a few clusters.
+How it fits together: [architecture.md](architecture.md). How the code works: [bot.md](bot.md).
 
-## 2. Architecture
+## Safety
 
-```mermaid
-flowchart LR
-    U[You in Slack] <-->|Socket Mode| GW
-
-    subgraph GW[KubeChat gateway - one Go binary]
-        A[Agent loop] --> G[Consent gate]
-    end
-
-    A <-->|chat + tool specs| LLM[Ollama]
-    G -->|read tools| R[MCP reader<br/>read-only]
-    G -->|read tools| K[K8sGPT MCP]
-    G -.->|only after Approve| W[MCP writer]
-
-    R -->|SA: view| API[(Kubernetes API)]
-    K -->|SA: read-only| API
-    W -->|SA: namespaced write| API
-```
-
-- The **gateway** is the only component that talks to Slack and the LLM. It has no Kubernetes permissions of its own.
-- The **reader**, **writer** and **K8sGPT** run as separate processes, each with its own ServiceAccount, so the Kubernetes API server enforces the read/write split as well.
-- During development the MCP servers run on the laptop. From the in-cluster step on they run as pods. Only URLs in `config.yaml` change.
-
-### Ports and adapters
-
-The core (agent, gate, policy, preview) depends only on small Go interfaces and imports only the standard library. Adapters plug in at startup in `cmd/kubechat/main.go`.
-
-| Port | Used by | v1 adapter | Test / later adapters |
-|---|---|---|---|
-| `Conversations` (inbound) | chat adapters | implemented by the agent | — |
-| `ChatSink` | agent | Slack thread replies | CLI, fake |
-| `Approver` | gate | Slack Block Kit card | CLI y/n prompt, fake |
-| `LLM` | agent | Ollama `/v1` | hosted API, scripted fake |
-| `Tools` | agent, preview | MCP (reader / writer / k8sgpt), wrapped by the gate | fake cluster |
-| `SessionStore`, `ApprovalStore` | agent, gate | SQLite | in-memory |
-| `AuditSink` | agent, gate | JSON to stdout + Prometheus | in-memory recorder |
-
-The **consent gate is a decorator on `Tools`**. The agent cannot tell whether it is there and has no way to reach the writer that skips it.
-
-## 3. Flow
-
-### Read: answering a question
-1. You @mention the bot. One Slack thread is one session.
-2. The agent loads the thread's history and sends it to the LLM along with the list of tools.
-3. The LLM asks for read tools (list pods, logs, events, …). The gate passes them through to the reader or K8sGPT.
-4. Tool output is **redacted** (tokens, keys, passwords) and **truncated** (about 200 lines or 20 KB), then given back to the LLM.
-5. Steps 3–4 repeat until the LLM answers, up to a maximum number of rounds. The reply goes into the thread: cause first, then evidence.
-
-### Write: a change with consent
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant Slack
-    participant Agent
-    participant LLM
-    participant Gate
-    participant Reader
-    participant Writer
-
-    User->>Slack: @kubechat scale demo-web to 3
-    Slack->>Agent: HandleMessage
-    Agent->>LLM: history + tools
-    LLM-->>Agent: tool call (write)
-    Agent->>Gate: Call
-    Gate->>Gate: classify tier, check policy
-    Gate->>Reader: get current object (for preview)
-    Gate->>Gate: save approval (hash, TTL)
-    Gate->>Slack: approval card (diff: replicas 2 → 3)
-    Gate-->>Agent: PendingApproval → run is parked
-    User->>Slack: clicks Approve
-    Slack->>Agent: HandleDecision
-    Agent->>Gate: Execute(decision)
-    Gate->>Gate: check approver, TTL, hash, single-use
-    Gate->>Writer: run the tool
-    Writer-->>Gate: result
-    Gate->>Slack: card updated: "Approved by …"
-    Agent->>LLM: tool result (or "rejected by user")
-    LLM-->>Agent: verifies the change / summarises
-    Agent->>Slack: reply in thread
-```
-
-Rules for writes:
-- **One open change per thread.** If the LLM asks for several writes in one turn, reads run first, the first write parks the run, and the others get "deferred: one change at a time".
-- **The approval is bound to the exact change**: a SHA-256 of tool + canonical args + cluster context. If anything changes, the approval is void.
-- **Approvals expire after 10 minutes and are single-use.** Only configured approvers can approve. Self-approval is on for a solo setup.
-- On Approve or Reject, the LLM is told the outcome, so it can verify the change or suggest something else.
-
-## 4. Safety model
-
-Three layers, each of which works on its own. If the LLM is fooled (for example by instructions planted in a pod log), the worst it can do without a click is read.
+Three layers, each enough on its own to stop a write:
 
 | Layer | What it enforces |
 |---|---|
-| 1. Kubernetes RBAC | Reader SA: cluster-wide `view` (no Secrets). Writer SA: namespaced Role, only in writable namespaces, with patch/update on workloads and delete on pods. Gateway SA: no cluster permissions. |
-| 2. MCP server config | Reader: `read_only = true`, Secrets denied. Writer: limited `enabled_tools`; Secrets and RBAC kinds denied. A NetworkPolicy lets only the gateway reach either server. |
-| 3. Consent gate | Tier check, policy, a human approval bound to a hash of the change, TTL, single use, audit log. |
+| Kubernetes RBAC | The bot has no Kubernetes permissions. kubernetes-mcp-server: `view` + cluster-read (nodes, PVs, storage classes, webhooks) + scale. K8sGPT: `view` + cluster-read only. `view` excludes Secrets. |
+| MCP server config | kubernetes-mcp-server: an `enabled_tools` list, and Secrets denied. |
+| Consent gate | Unknown or unclear tools count as destructive (fail closed); writes need a namespace that isn't protected, then approval, and approval isn't built yet. |
 
-### Tool tiers
-At startup the gateway calls `tools/list` on every MCP server and gives each tool a tier. Order of precedence: **config override → MCP annotations → unknown = destructive** (fail closed).
+Tool output is untrusted data: the prompt says never to follow instructions found in it,
+and it's redacted (tokens, keys, passwords) and size-capped before the LLM sees it.
 
-| Tier | Examples | Behaviour |
-|---|---|---|
-| read | `pods_list`, `pods_log`, `events_list`, `resources_get`, k8sgpt analyze | Runs at once on the reader |
-| write | `resources_create_or_update` (scale, image bump) | Approval card, then runs on the writer |
-| destructive | `resources_delete`, `pods_delete` | Approval card with a red banner |
-| blocked | deny-listed tools, denied namespaces | Refused before reaching Slack |
+## Decisions, and why
 
-### Data handling
-- Tool output is **untrusted data**. The system prompt tells the model never to follow instructions found in logs or resources.
-- Output is redacted and size-capped before it reaches the LLM or Slack.
-- Logs and YAML never leave your network. Only the replies posted to Slack do.
+| Decision | Why |
+|---|---|
+| Local model (Ollama), qwen3:14b | Cluster data stays on the laptop. 14b scored 11/15 against 9/15 for 8b, with nothing invented; it's about 3 times slower. |
+| K8sGPT as a second MCP server, all tools offered | `analyze` finds known problems in one call. K8sGPT also reads nodes and the cluster version. |
+| All K8sGPT tools count as reads (`KUBECHAT_MCP_READ_ONLY`) | Its MCP library marks every tool destructive by default, so the hints mean nothing. Its RBAC can only read. |
+| Our own K8sGPT template, not their chart | Their chart isn't published, and its role reads everything, Secrets included. |
+| Settings as environment variables | No config library needed; the chart renders them into a ConfigMap and a Secret. |
+| Writes deferred | Read-only answers first. When writes come back, anyone in the thread may approve. |
 
-## 5. Build steps
+## Known limits
 
-Each step ends with a **Check**. Don't move on until it passes, and commit at the end of every step.
+- **Invented answers after an empty filtered list.** The model filters on a wrong field or an
+  exact name, gets nothing, and then guesses (questions 9, 11 and 12 in `experiments/`).
+  Prompt rules didn't fix it, so the next fix is in code.
+- **Speed:** about 1 to 2 minutes per answer with 14b, up to 5 on hard questions.
+- **Thread memory is in the bot's memory:** a restart forgets it.
+- **One cluster**, and Ollama must be running on the laptop.
 
-| Milestone | Steps | You can… |
-|---|---|---|
-| M0 Local playground | 1–6 | talk to the MCP servers, K8sGPT and Ollama by hand |
-| M2 Read-only agent | 7–9 | ask "why are pods failing?" from the terminal |
-| M1 + M3 Slack and health | 10–11 | do the same in Slack, plus `/k8s health` |
-| M4 Consent gate | 12 | approve or reject changes from a Slack card |
-| M5 In-cluster, hardened | 13–14 | run it all inside kind with no laptop processes |
+## Roadmap
 
-| # | Step | Done when |
-|---|---|---|
-| 1 | Install tools: Go, Docker, kind, kubectl, Helm, Node, k8sgpt, Ollama | every tool prints a version |
-| 2 | Create the kind cluster (2 nodes, `apps` and `staging` namespaces, metrics-server) | 2 Ready nodes; `kubectl top nodes` works |
-| 3 | Plant three faults in `apps`: bad image, OOM, crash loop; plus a healthy `demo-web` | the three failure states are visible, and 2 web pods run |
-| 4 | Run the MCP reader and writer on the laptop; explore them with MCP Inspector; record the real tool names in `docs/tools.md` | crash logs readable through MCP; the reader refuses a delete |
-| 5 | Run K8sGPT's MCP server | `k8sgpt analyze` finds all three faults |
-| 6 | Pull a model in Ollama and test tool calling with curl | the response contains the expected `tool_calls` |
-| 7 | Repo skeleton: `internal/core` (types + ports), fakes, stdlib-only import rule | `go build` and `go test` pass |
-| 8 | MCP adapter (merged tool registry) + policy (tiers, namespaces, approvers) | `kubechat tools` lists every tool with its tier |
-| 9 | LLM adapter, redaction, agent loop, CLI front-end (`kubechat ask`), reads only | the CLI names all three causes with evidence |
-| 10 | Slack app (Socket Mode), Slack adapter, SQLite sessions | the same answer in Slack; follow-ups keep context |
-| 11 | `/k8s health` via K8sGPT, also available to the agent as a read tool | it lists the three faults |
-| 12 | Consent gate: approvals, preview diff, CLI then Slack card, audit log | scale 2 → 3 works on Approve; Reject, expiry and tampering do nothing |
-| 13 | Deploy into kind: images, RBAC, MCP configs, NetworkPolicy, gateway | works with all laptop processes stopped; the reader can't delete pods |
-| 14 | Harden: metrics, traces, rate limits, multi-cluster `/k8s ctx`, CI safety tests | a dashboard shows tool calls by tier and approvals by outcome |
-
-## 6. Notes from design review
-
-Things to handle or verify during the build, by the step where they come up:
-
-- **Step 2:** use a dedicated `dev/kubeconfig` for the kind cluster and pass it to every local server, so nothing can act on another cluster by accident.
-- **Step 3:** use multi-arch images (Apple Silicon is arm64).
-- **Step 5:** `k8sgpt serve` may use ports 8080/8081 by default, which clash with the MCP servers. Move it to free ports.
-- **Step 6:** set Ollama's context length (`OLLAMA_CONTEXT_LENGTH`). The `/v1` API can't set it per request, and an overflow silently drops the start of the prompt.
-- **Step 8:** reader and writer both offer `resources_get`, so read tools are always routed to the reader. `resources_create_or_update` takes the whole manifest as one argument, so the policy has to parse it to find the namespace, and a manifest without a namespace is refused.
-- **Step 9:** the agent goes through a minimal gate that refuses every non-read call until Step 12. There is never a bypass.
-- **Steps 9–12:** one run per thread at a time. A new message while a change is pending cancels that pending approval.
-- **Step 13:** the built-in `view` role already covers `pods/log` and metrics but not nodes, so the reader gets an extra role for nodes.
-
-## 7. Open questions
-
-- [ ] Which model fits best: compare a few on the Step 9 questions.
-- [ ] Which namespaces are writable in v1? (Assumed: `apps`, `staging`.)
-- [ ] Should `denied_namespaces` also block **reads**, or only writes? (Recommended: writes only.)
-- [ ] Are **creates** in scope for v1? The writer Role currently has no `create`.
-- [ ] Do you have admin rights in a Slack workspace to install a custom app? (Needed by Step 10.)
-- [x] LLM provider: local model via Ollama.
-- [x] First cluster: kind on the laptop.
-- [x] Solo or team: solo; you approve your own changes.
+| Next | What |
+|---|---|
+| Accuracy | When a filtered list comes back empty, tell the model right in that tool result; measure over several runs. |
+| Writes | Approve/Reject card in the thread, bound to the exact change, single use, 10-minute expiry. |
+| v0.2 | Separate reader and writer MCP servers with their own RBAC; a diff before each change; thread history in SQLite. |
+| v0.3 | `/k8s` slash command and a CLI. |
+| v0.4 | NetworkPolicy, metrics. |
+| v0.5 | Destructive tier, several clusters, tracing. |
